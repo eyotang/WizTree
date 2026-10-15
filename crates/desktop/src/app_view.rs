@@ -18,17 +18,7 @@ impl DiskApp {
                     .items_center()
                     .gap_2()
                     .mr_4()
-                    .child(
-                        div()
-                            .size(px(30.))
-                            .rounded(px(9.))
-                            .bg(cx.theme().primary.opacity(0.12))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(cx.theme().primary)
-                            .child(Icon::new(IconName::ChartPie).small()),
-                    )
+                    .child(img(crate::branding::logo()).size(px(32.)))
                     .child(
                         div()
                             .text_size(px(18.))

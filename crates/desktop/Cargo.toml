@@ -25,3 +25,11 @@ dialog-smoke = []
 interaction-smoke = []
 
 appearance-smoke = ["dep:gpui-visual"]
+
+[build-dependencies]
+winresource = "=0.1.34"
+
+[target.'cfg(target_os = "linux")'.dependencies.image]
+version = "=0.25.10"
+default-features = false
+features = ["png"]

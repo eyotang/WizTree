@@ -1,6 +1,5 @@
 """Create allowlisted source archives and native platform packages."""
 import argparse
-import gzip
 import hashlib
 import json
 import os
@@ -10,7 +9,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 import tomllib
 import zipfile
@@ -46,11 +44,11 @@ def public_source(stage, out):
     for name in ["Cargo.toml","Cargo.lock"]:
         shutil.copyfile(ROOT/name,tree/name)
     for path in (ROOT/"crates").rglob("*"):
-        if path.is_file() and (path.suffix==".rs" or path.name=="Cargo.toml"):
+        if path.is_file() and (path.suffix==".rs" or path.name=="Cargo.toml" or path.relative_to(ROOT/"crates") in {Path("desktop/assets/WizTree.png"), Path("desktop/assets/WizTree.ico")}):
             if path.is_symlink():raise RuntimeError("Unexpected source symlink")
             dest=tree/path.relative_to(ROOT);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(path,dest)
     for path in PUBLIC.rglob("*"):
-        if path.is_file() and (path.suffix==".md" or path.name in {"LICENSE",".gitignore","install-linux.sh"}
+        if path.is_file() and (path.suffix==".md" or path.name in {"LICENSE",".gitignore"}
                                or path.relative_to(PUBLIC)==Path("docs/media/wiztree-preview.png")):
             if path.is_symlink():raise RuntimeError("Unexpected public template symlink")
             relative=path.relative_to(PUBLIC)
@@ -128,7 +126,7 @@ def package_macos(stage, out, binary_dir, arch):
     volume=stage/"dmg-volume";volume.mkdir()
     shutil.move(str(app),volume/"WizTree.app")
     (volume/"Applications").symlink_to("/Applications",target_is_directory=True)
-    (volume/"安装说明.txt").write_text("将 WizTree.app 拖入 Applications（应用程序），然后从启动台打开 WizTree。\n",encoding="utf-8")
+    (volume/"安装说明.txt").write_text("将 WizTree.app 拖入 Applications（应用程序），然后从启动台打开 WizTree。\n当前版本尚未经过 Apple 公证。确认下载来源与校验值后，如需解除此应用的隔离标记，可在终端执行：\nxattr -dr com.apple.quarantine \"/Applications/WizTree.app\"\n也可在系统设置 → 隐私与安全性中选择仍要打开。\n",encoding="utf-8")
     output=out/f"WizTree-{VERSION}-macos-{arch}.dmg"
     subprocess.run(["hdiutil","create","-volname","WizTree","-srcfolder",str(volume),"-ov","-format","UDZO",str(output)],check=True)
     subprocess.run(["hdiutil","verify",str(output)],check=True)
@@ -141,20 +139,73 @@ def package_macos(stage, out, binary_dir, arch):
     return output
 
 def package_linux(stage, out, binary_dir, arch):
-    tree=stage/f"WizTree-{VERSION}-linux-{arch}";tree.mkdir()
-    for original,public in [("wiztree-rust","wiztree"),("disk-scan","disk-scan")]:
-        dest=tree/public;shutil.copyfile(binary_dir/original,dest);dest.chmod(0o755)
-    common_docs(tree);notices(tree,"x86_64-unknown-linux-gnu")
+    if sys.platform != "linux":
+        raise RuntimeError("Ubuntu DEB creation requires a native Ubuntu build host")
+    deb_arch = {"x86_64": "amd64", "arm64": "arm64"}[arch]
+    target = {"x86_64": "x86_64-unknown-linux-gnu", "arm64": "aarch64-unknown-linux-gnu"}[arch]
+    tree = stage / "deb-root"
+    executable = tree / "usr/bin/wiztree"
+    executable.parent.mkdir(parents=True)
+    shutil.copyfile(binary_dir / "wiztree-rust", executable)
+    executable.chmod(0o755)
+    docs = tree / "usr/share/doc/wiztree"
+    docs.mkdir(parents=True)
+    common_docs(docs)
+    notices(docs, target)
+    shutil.copyfile(PUBLIC / "LICENSE", docs / "copyright")
     from release_icons import png
-    (tree/"WizTree.png").write_bytes(png(256))
-    shutil.copyfile(PUBLIC/"install-linux.sh",tree/"install.sh");(tree/"install.sh").chmod(0o755)
+    for size in (16, 32, 48, 64, 128, 256, 512):
+        icon = tree / f"usr/share/icons/hicolor/{size}x{size}/apps/app.wiztree.desktop.png"
+        icon.parent.mkdir(parents=True)
+        icon.write_bytes(png(size))
+    launcher = tree / "usr/share/applications/app.wiztree.desktop.desktop"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("[Desktop Entry]\nType=Application\nName=WizTree\n"
+                        "Comment=Analyze disk space\nComment[zh_CN]=分析磁盘空间占用\n"
+                        "Exec=wiztree\nTryExec=wiztree\nIcon=app.wiztree.desktop\n"
+                        "Terminal=false\nCategories=System;Utility;\n"
+                        "StartupWMClass=app.wiztree.desktop\n", encoding="utf-8")
+    # Obtain ABI version constraints from the actual linked executable, rather
+    # than guessing GLIBC versions or depending on development packages.
+    dependency_work = stage / "dependency-check"
+    (dependency_work / "debian").mkdir(parents=True)
+    (dependency_work / "debian/control").write_text(
+        "Source: wiztree\nSection: utils\nPriority: optional\n"
+        "Maintainer: WizTree contributors <contributors@wiztree.invalid>\n\n"
+        "Package: wiztree\nArchitecture: any\nDescription: Disk space analyzer\n", encoding="utf-8")
+    dependency_output = subprocess.check_output(
+        ["dpkg-shlibdeps", "-O", "-e" + str(executable)], cwd=dependency_work, text=True)
+    linked = next(line.split("=", 1)[1] for line in dependency_output.splitlines()
+                  if line.startswith("shlibs:Depends="))
+    # These backends are loaded dynamically by the desktop toolkit.
+    runtime = ["libvulkan1", "libegl1", "libwayland-client0", "libwayland-cursor0",
+               "libwayland-egl1", "libxkbcommon0", "libxkbcommon-x11-0", "libxcb1",
+               "libxcb-xkb1", "libxcb-render0", "libxcb-shm0", "libxcb-xfixes0",
+               "libxcursor1", "libxi6", "libxrandr2"]
+    dependencies = sorted(set(linked.split(", ")) | set(runtime))
+    control = tree / "DEBIAN"
+    control.mkdir()
+    installed_size = (sum(path.stat().st_size for path in (tree / "usr").rglob("*") if path.is_file()) + 1023) // 1024
+    (control / "control").write_text(
+        f"Package: wiztree\nVersion: {VERSION}\nSection: utils\nPriority: optional\n"
+        f"Architecture: {deb_arch}\nMaintainer: WizTree contributors <contributors@wiztree.invalid>\n"
+        f"Installed-Size: {installed_size}\nDepends: {', '.join(dependencies)}\n"
+        "Recommends: xdg-desktop-portal, xdg-utils\n"
+        "Homepage: https://github.com/eyotang/WizTree\n"
+        "Description: Native disk space analyzer\n"
+        " Explore disk usage with a directory tree, file search and a treemap.\n",
+        encoding="utf-8")
+    # No privileged maintainer scripts or extra scanner executables are shipped.
+    for path in tree.rglob("*"):
+        path.chmod(0o755 if path.is_dir() or path == executable else 0o644)
+        os.utime(path, (0, 0))
+    tree.chmod(0o755)
     require_clean(tree)
-    output=out/(tree.name+".tar.gz")
-    with output.open("wb") as raw, gzip.GzipFile(filename="",mode="wb",fileobj=raw,mtime=0) as compressed, tarfile.open(fileobj=compressed,mode="w") as archive:
-        for path in sorted(tree.rglob("*")):
-            if not path.is_file():continue
-            info=archive.gettarinfo(str(path),(Path(tree.name)/path.relative_to(tree)).as_posix());info.uid=info.gid=0;info.uname=info.gname="";info.mtime=0
-            with path.open("rb") as data:archive.addfile(info,data)
+    output = out / f"WizTree-{VERSION}-ubuntu-{deb_arch}.deb"
+    env = os.environ.copy()
+    env["SOURCE_DATE_EPOCH"] = "0"
+    subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", "--build", str(tree), str(output)],
+                   env=env, check=True)
     return output
 
 def main():
@@ -182,7 +233,7 @@ def main():
         binary_dir=args.binary_dir.resolve()
         if args.platform=="windows":
             tree=stage/f"WizTree-{VERSION}-windows-{args.arch}";tree.mkdir()
-            for original,public in [("wiztree-rust.exe","WizTree.exe"),("disk-scan.exe","disk-scan.exe")]:shutil.copyfile(binary_dir/original,tree/public)
+            for original,public in [("wiztree-rust.exe","WizTree.exe")]:shutil.copyfile(binary_dir/original,tree/public)
             common_docs(tree);report["third_party_components"]=notices(tree,"x86_64-pc-windows-msvc")
             require_clean(tree);output=out/(tree.name+".zip");zip_tree(tree,output);artifacts.append(output)
         elif args.platform=="macos":artifacts.append(package_macos(stage,out,binary_dir,args.arch))
@@ -192,7 +243,7 @@ def main():
         report["audits"][path.name]=require_clean(path) if path.suffix==".zip" else {"passed":True,"scope":"pre-container app/tree audit"}
     sums=[]
     for path in sorted(out.iterdir()):
-        if path.is_file() and (path.suffix in [".zip",".dmg"] or path.name.endswith(".tar.gz")):
+        if path.is_file() and (path.suffix in [".zip",".dmg",".deb"] or path.name.endswith(".tar.gz")):
             sums.append(hashlib.sha256(path.read_bytes()).hexdigest()+"  "+path.name)
     (out/"SHA256SUMS.txt").write_text("\n".join(sums)+"\n",encoding="utf-8")
     (out/f"release-audit-{args.platform or 'source'}-{args.arch}.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")

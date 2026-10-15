@@ -38,3 +38,25 @@ def iconset(path):
             if size not in cache:cache[size]=png(size)
             suffix="@2x" if factor==2 else ""
             (path/f"icon_{base}x{base}{suffix}.png").write_bytes(cache[size])
+
+
+def ico():
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    images = [png(size) for size in sizes]
+    offset = 6 + 16 * len(images)
+    result = bytearray(struct.pack("<HHH", 0, 1, len(images)))
+    for size, data in zip(sizes, images):
+        result.extend(struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset))
+        offset += len(data)
+    return bytes(result) + b"".join(images)
+
+
+def desktop_assets(path):
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "WizTree.png").write_bytes(png(256))
+    (path / "WizTree.ico").write_bytes(ico())
+
+
+if __name__ == "__main__":
+    desktop_assets(Path(__file__).resolve().parents[1] / "crates/desktop/assets")

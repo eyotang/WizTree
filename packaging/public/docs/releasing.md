@@ -32,7 +32,15 @@ DMG 内包含原生 `WizTree.app` 与指向“应用程序”的入口。打开 
 
 ## 首次打开 macOS 安装包
 
-将 .app 拖到“应用程序”后，从启动台打开。当前版本没有 Apple 公证；若系统提示无法验证开发者，请先确认下载来源和校验值。用户选择信任该应用时，可按 [Apple 官方说明](https://support.apple.com/zh-cn/102445) 在“系统设置 → 隐私与安全性”中针对这一个应用选择“仍要打开”。之后可正常从启动台打开；无需终端命令或关闭系统整体安全检查。
+将 .app 拖到“应用程序”后，从启动台打开。当前版本没有 Apple 公证；若系统提示无法验证开发者，请先确认下载来源和校验值。用户选择信任该应用时，可按 [Apple 官方说明](https://support.apple.com/zh-cn/102445) 在“系统设置 → 隐私与安全性”中针对这一个应用选择“仍要打开”。之后可正常从启动台打开。
+
+也可在确认来源和 SHA256 校验值后，于终端仅解除此应用的下载隔离标记：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/WizTree.app"
+```
+
+执行后重新从启动台打开。此命令不代表完成代码签名或 Apple 公证；无需关闭系统整体安全检查。
 
 ## 隐私与许可证检查
 
@@ -44,4 +52,26 @@ DMG 内包含原生 `WizTree.app` 与指向“应用程序”的入口。打开 
 
 ## 安装包验收
 
-打包后运行 `tools/verify_package.py`，参数与打包命令的 `--platform`、`--arch`、`--binary-dir` 及 `--out` 一致。Windows/Linux 从实际压缩包解包后运行扫描器，核对跨批次目录、中文名称、CSV、不同线程数及缺失根目录。Linux 还执行隔离用户安装；macOS 挂载只读 DMG，检查应用结构、架构、签名及 Applications 入口，并验证同次原生构建的扫描器。报告明确区分安装包检查、桌面交互验收和首次扫描性能验收；前者通过不代替后两项。
+打包后运行 `tools/verify_package.py`，参数与打包命令的 `--platform`、`--arch`、`--binary-dir` 及 `--out` 一致。Windows 从 ZIP 校对主程序与嵌入图标资源；Ubuntu 解包 DEB 检查标准安装目录、运行时依赖、桌面入口、图标和主程序，并在一次性 Ubuntu 容器内用 apt 安装、dpkg 重装和 apt 卸载；macOS 挂载只读 DMG，检查应用结构、架构、签名及 Applications 入口。桌面安装包均不附带开发 CLI。扫描统计、CSV、单/多线程和缺失目录检查使用同次原生构建的命令行工具；报告明确注明这一范围。安装包检查、桌面交互验收和首次扫描性能验收分别记录。
+
+## Ubuntu 安装与卸载
+
+面向 Ubuntu 24.04 及以上的 x86_64 系统，发布原生 `.deb`，由包管理器处理运行依赖及桌面入口，无需 install.sh。
+
+```sh
+sudo apt install ./WizTree-0.1.1-ubuntu-amd64.deb
+```
+
+安装后从应用列表打开 WizTree，也可运行 `wiztree`。下载新版 DEB 后使用相同命令升级；卸载：
+
+```sh
+sudo apt remove wiztree
+```
+
+应用与图标安装到标准系统目录；用户的设置与已导出文件不随卸载删除。其他 Linux 发行版可从源码构建，不将 Ubuntu 的兼容范围泛化为全部 Linux。
+
+## 应用图标与命令行工具
+
+三端使用同一空间图标识。Windows EXE 嵌入多尺寸 ICO 及中性版本信息；macOS `.app` 使用 ICNS；Ubuntu 安装 hicolor 图标与匹配应用标识的 desktop 入口，支持 Wayland 应用分组。主界面显示相同图标。
+
+主程序直接链接 `disk-core`，扫描在进程内后台线程运行，无需启动外部 EXE。`disk-scan` 仅用于开发、脚本和 CI 验收，不随桌面安装包分发。

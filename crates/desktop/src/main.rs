@@ -2,6 +2,7 @@
 extern crate gpui_kit as gpui;
 mod app;
 mod appearance;
+mod branding;
 mod image_export;
 mod interaction;
 mod query;
@@ -40,6 +41,7 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            cx.set_app_identity("app.wiztree.desktop", "WizTree");
             cx.bind_keys([
                 KeyBinding::new("alt-left", app::GoBack, Some("DiskApp")),
                 KeyBinding::new("alt-right", app::GoForward, Some("DiskApp")),
@@ -62,6 +64,9 @@ fn main() {
                 KeyBinding::new("escape", app::CancelScan, Some("DiskApp")),
             ]);
             let options = WindowOptions {
+                app_id: Some("app.wiztree.desktop".into()),
+                #[cfg(target_os = "linux")]
+                icon: Some(branding::window_icon()),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
                     size(px(1380.), px(920.)),

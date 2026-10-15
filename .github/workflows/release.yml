@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxrandr-dev libxi-dev libxcursor-dev libgl1-mesa-dev libvulkan-dev libssl-dev libdbus-1-dev
+          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxrandr-dev libxi-dev libxcursor-dev libgl1-mesa-dev libvulkan-dev libssl-dev libdbus-1-dev desktop-file-utils
       - name: Native scanner and UI regression tests
         run: cargo test --locked --workspace
       - name: Strict compiler checks
@@ -77,7 +77,7 @@ jobs:
           import os
           import subprocess
           import sys
-          subprocess.run([sys.executable, 'tools/verify_package.py', '--platform', os.environ['PACKAGE_PLATFORM'], '--arch', os.environ['PACKAGE_ARCH'], '--binary-dir', os.environ['BINARY_DIRECTORY']], check=True)
+          subprocess.run([sys.executable, 'tools/verify_package.py', '--platform', os.environ['PACKAGE_PLATFORM'], '--arch', os.environ['PACKAGE_ARCH'], '--binary-dir', os.environ['BINARY_DIRECTORY']] + (['--install-check'] if os.environ['PACKAGE_PLATFORM'] == 'linux' else []), check=True)
       - name: Upload reviewable packages
         uses: actions/upload-artifact@v7
         with:
@@ -85,7 +85,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.dmg
-            dist/*.tar.gz
+            dist/*.deb
             dist/SHA256SUMS.txt
             dist/release-audit-*.json
             dist/package-validation-*.json

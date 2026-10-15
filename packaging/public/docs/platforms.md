@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | Windows x64 | 原生批量目录属性读取；实验性 NTFS MFT | 工作区测试和桌面运行通过 |
 | macOS Apple Silicon / Intel | getattrlistbulk，按返回属性解码；不支持时回退 POSIX | 两种架构原生测试与 DMG 检查通过；Apple Silicon 原生交互检查通过 |
-| Linux x64 | 缓冲 readdir 与相对目录句柄的 fstatat | 原生测试、Xvfb 桌面交互、安装包运行及 WSLg 启动通过 |
+| Ubuntu 24.04+ x64（DEB） | 缓冲 readdir 与相对目录句柄的 fstatat | 原生测试、Xvfb 桌面交互、安装包运行及 WSLg 启动通过 |
 
 树结构、查询、进度和 UI 共用；系统元数据读取分平台实现。MFT 菜单仅在 Windows 展示。普通符号链接、Windows 重解析点及特殊设备跳过，读取错误计数并保留有限样本。
 
