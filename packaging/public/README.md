@@ -51,9 +51,9 @@ Windows 使用 Visual Studio C++ 构建工具和 Windows SDK；macOS 使用完�
 
 ## 当前边界
 
-0.1.0 尚未正式发布；问题修复并完成验收后再发布。当前性能已按实际使用体验验收；不同磁盘、权限和缓存条件下的耗时会有差异。MFT、超大规模目录和复杂文件系统口径仍需进一步验证。占用合计不保证等于删除后实际释放空间。
+当前版本为 0.1.0。不同磁盘、权限和缓存条件下的耗时会有差异。MFT、超大规模目录和复杂文件系统口径仍需进一步验证。占用合计不保证等于删除后实际释放空间。
 
-Windows 工作区测试和 Linux WSL 核心测试已通过；macOS 核心的 Intel/Apple Silicon 编译检查通过，macOS 实机扫描以及 macOS/Linux 桌面实机尚待验收。正式 macOS 分发还需要合适的 Developer ID 签名与公证。
+Windows、macOS 与 Linux 的原生测试和桌面交互检查已通过；macOS Intel 与 Apple Silicon 分别构建。macOS 当前使用 ad-hoc 签名，尚未经过 Apple 公证；首次启动提示与处理方式见[发布与安装](docs/releasing.md)。
 
 详见 [平台说明](docs/platforms.md)、[发布与安装](docs/releasing.md) 和 [验证范围](docs/validation.md)。
 

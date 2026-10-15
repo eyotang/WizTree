@@ -26,9 +26,13 @@ DMG 内包含原生 `WizTree.app` 与指向“应用程序”的入口。打开 
 
 ## macOS 正式分发
 
-默认打包使用 ad-hoc 签名，仅用于构建验证。正式分发需在 Mac 上配置适合本项目的个人 Developer ID，使用 `MACOS_SIGNING_IDENTITY` 指定身份；不要默认使用含工作单位信息的签名证书。配置好系统钥匙串的公证凭据后，设置 `MACOS_NOTARY_PROFILE`，脚本将提交公证并附加、验证票据。不要把证书、口令或账号写入源码。
+当前安装包使用 ad-hoc 签名，尚未执行 Apple 公证。如需可验证开发者身份的分发签名，在 Mac 上配置适合本项目的个人 Developer ID，使用 `MACOS_SIGNING_IDENTITY` 指定身份；不要默认使用含工作单位信息的签名证书。配置好系统钥匙串的公证凭据后，设置 `MACOS_NOTARY_PROFILE`，脚本将提交公证并附加、验证票据。不要把证书、口令或账号写入源码。
 
 公证需要网络与开发者账号；未执行时不得把安装包标记为已公证，也不得声称已通过 Gatekeeper 验收。依据：[Apple 分发打包](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution)、[Apple 公证流程](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)。
+
+## 首次打开 macOS 安装包
+
+将 .app 拖到“应用程序”后，从启动台打开。当前版本没有 Apple 公证；若系统提示无法验证开发者，请先确认下载来源和校验值。用户选择信任该应用时，可按 [Apple 官方说明](https://support.apple.com/zh-cn/102445) 在“系统设置 → 隐私与安全性”中针对这一个应用选择“仍要打开”。之后可正常从启动台打开；无需终端命令或关闭系统整体安全检查。
 
 ## 隐私与许可证检查
 
