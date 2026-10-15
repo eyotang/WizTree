@@ -191,6 +191,13 @@ pub struct Progress {
 /// Summed worker I/O time (may exceed wall time because operations overlap).
 #[derive(Default, Debug)]
 pub struct DirectoryIo {
+    pub worker_start_delay_ns: AtomicU64,
+    pub queue_wait_ns: AtomicU64,
+    pub entry_allocate_ns: AtomicU64,
+    pub enumerate_ns: AtomicU64,
+    pub publish_wait_ns: AtomicU64,
+    pub publish_ns: AtomicU64,
+    pub job_drop_ns: AtomicU64,
     pub aggregate_ns: AtomicU64,
     pub traversal_ns: AtomicU64,
     pub pool_ns: AtomicU64,
@@ -207,6 +214,13 @@ pub struct DirectoryIo {
 }
 #[derive(Clone, Copy, Default, Debug)]
 pub struct DirectoryIoSnapshot {
+    pub worker_start_delay_ns: u64,
+    pub queue_wait_ns: u64,
+    pub entry_allocate_ns: u64,
+    pub enumerate_ns: u64,
+    pub publish_wait_ns: u64,
+    pub publish_ns: u64,
+    pub job_drop_ns: u64,
     pub aggregate_ns: u64,
     pub traversal_ns: u64,
     pub pool_ns: u64,
@@ -224,6 +238,13 @@ pub struct DirectoryIoSnapshot {
 impl DirectoryIo {
     fn snapshot(&self) -> DirectoryIoSnapshot {
         DirectoryIoSnapshot {
+            worker_start_delay_ns: self.worker_start_delay_ns.load(Ordering::Relaxed),
+            queue_wait_ns: self.queue_wait_ns.load(Ordering::Relaxed),
+            entry_allocate_ns: self.entry_allocate_ns.load(Ordering::Relaxed),
+            enumerate_ns: self.enumerate_ns.load(Ordering::Relaxed),
+            publish_wait_ns: self.publish_wait_ns.load(Ordering::Relaxed),
+            publish_ns: self.publish_ns.load(Ordering::Relaxed),
+            job_drop_ns: self.job_drop_ns.load(Ordering::Relaxed),
             aggregate_ns: self.aggregate_ns.load(Ordering::Relaxed),
             traversal_ns: self.traversal_ns.load(Ordering::Relaxed),
             pool_ns: self.pool_ns.load(Ordering::Relaxed),
@@ -241,6 +262,13 @@ impl DirectoryIo {
     }
     fn reset(&self) {
         for value in [
+            &self.worker_start_delay_ns,
+            &self.queue_wait_ns,
+            &self.entry_allocate_ns,
+            &self.enumerate_ns,
+            &self.publish_wait_ns,
+            &self.publish_ns,
+            &self.job_drop_ns,
             &self.aggregate_ns,
             &self.traversal_ns,
             &self.pool_ns,
@@ -423,7 +451,7 @@ pub fn scan_with_strategy(
         pool.scope(|scope| {
             for _ in 0..options.workers.clamp(1, 64) {
                 let shared = &shared;
-                scope.spawn(move |_| worker(shared, cancel, progress));
+                scope.spawn(move |_| worker(shared, cancel, progress, traversal_started));
             }
         });
         progress.directory_io.traversal_ns.store(
@@ -460,9 +488,19 @@ pub fn scan_with_strategy(
         issues: state.issues,
     })
 }
-fn worker(shared: &(Mutex<State>, Condvar), cancel: &AtomicBool, progress: &Progress) {
+fn worker(
+    shared: &(Mutex<State>, Condvar),
+    cancel: &AtomicBool,
+    progress: &Progress,
+    dispatched: Instant,
+) {
+    let metrics = &progress.directory_io;
+    metrics
+        .worker_start_delay_ns
+        .fetch_add(dispatched.elapsed().as_nanos() as u64, Ordering::Relaxed);
     let mut reader = platform::Reader::new();
     loop {
+        let queue_started = Instant::now();
         let job = {
             let mut state = shared.0.lock().unwrap();
             loop {
@@ -476,9 +514,18 @@ fn worker(shared: &(Mutex<State>, Condvar), cancel: &AtomicBool, progress: &Prog
                 state = shared.1.wait(state).unwrap();
             }
         };
+        metrics
+            .queue_wait_ns
+            .fetch_add(queue_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        let allocation_started = Instant::now();
         let mut entries = Vec::with_capacity(1024);
+        metrics.entry_allocate_ns.fetch_add(
+            allocation_started.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
         let mut issues = Vec::new();
         let mut error_count = 0u64;
+        let enumeration_started = Instant::now();
         let result =
             enumerate_directory(&job, cancel, progress, &mut reader, |entry| match entry {
                 Ok(entry) => {
@@ -497,6 +544,10 @@ fn worker(shared: &(Mutex<State>, Condvar), cancel: &AtomicBool, progress: &Prog
                     }
                 }
             });
+        metrics.enumerate_ns.fetch_add(
+            enumeration_started.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
         if let Err(error) = result {
             error_count += 1;
             if issues.len() < MAX_ISSUES {
@@ -507,12 +558,28 @@ fn worker(shared: &(Mutex<State>, Condvar), cancel: &AtomicBool, progress: &Prog
             }
         }
         commit_entries(shared, job.parent, &mut entries, progress);
+        let publish_started = Instant::now();
         let mut state = shared.0.lock().unwrap();
+        metrics.publish_wait_ns.fetch_add(
+            publish_started.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
+        let publish_started = Instant::now();
         progress.errors.fetch_add(error_count, Ordering::Relaxed);
         let remaining = MAX_ISSUES.saturating_sub(state.issues.len());
         state.issues.extend(issues.into_iter().take(remaining));
         state.pending -= 1;
         shared.1.notify_all();
+        drop(state);
+        metrics.publish_ns.fetch_add(
+            publish_started.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
+        let drop_started = Instant::now();
+        drop(job);
+        metrics
+            .job_drop_ns
+            .fetch_add(drop_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 }
 fn enumerate_directory(
@@ -594,7 +661,14 @@ fn commit_entries(
     if entries.is_empty() {
         return;
     }
+    let metrics = &progress.directory_io;
+    let publish_started = Instant::now();
     let mut state = shared.0.lock().unwrap();
+    metrics.publish_wait_ns.fetch_add(
+        publish_started.elapsed().as_nanos() as u64,
+        Ordering::Relaxed,
+    );
+    let publish_started = Instant::now();
     let (mut files, mut dirs, mut bytes) = (0u64, 0u64, 0u64);
     for entry in entries.drain(..) {
         let id = state.nodes.len();
@@ -626,6 +700,11 @@ fn commit_entries(
     progress.dirs.fetch_add(dirs, Ordering::Relaxed);
     progress.bytes.fetch_add(bytes, Ordering::Relaxed);
     shared.1.notify_all();
+    drop(state);
+    metrics.publish_ns.fetch_add(
+        publish_started.elapsed().as_nanos() as u64,
+        Ordering::Relaxed,
+    );
 }
 #[cfg(unix)]
 fn allocated_size(_: &Path, metadata: &Metadata) -> io::Result<u64> {

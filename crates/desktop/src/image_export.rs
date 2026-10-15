@@ -80,7 +80,7 @@ pub fn save_png(
             if y + 1 == bottom || y == 0 {
                 continue;
             }
-            for pixel in row.chunks_exact_mut(3) {
+            for pixel in row.as_chunks_mut::<3>().0 {
                 pixel.copy_from_slice(&rgb);
             }
             // Draw each shared edge once, on its top/left owner's right/bottom.

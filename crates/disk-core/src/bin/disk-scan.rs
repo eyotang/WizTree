@@ -135,6 +135,16 @@ fn run() -> io::Result<()> {
             io.traversal_ns as f64 / 1e6,
             io.aggregate_ns as f64 / 1e6
         );
+        let line = format!(
+            "{line} worker_start_delay_ms={:.3} queue_wait_ms={:.3} entry_allocate_ms={:.3} enumerate_ms={:.3} publish_wait_ms={:.3} publish_ms={:.3} job_drop_ms={:.3}",
+            io.worker_start_delay_ns as f64 / 1e6,
+            io.queue_wait_ns as f64 / 1e6,
+            io.entry_allocate_ns as f64 / 1e6,
+            io.enumerate_ns as f64 / 1e6,
+            io.publish_wait_ns as f64 / 1e6,
+            io.publish_ns as f64 / 1e6,
+            io.job_drop_ns as f64 / 1e6
+        );
         println!("{line}");
         if let Some(output) = &mut report {
             writeln!(output, "{line}")?;
