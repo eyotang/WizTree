@@ -50,7 +50,8 @@ def public_source(stage, out):
             if path.is_symlink():raise RuntimeError("Unexpected source symlink")
             dest=tree/path.relative_to(ROOT);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(path,dest)
     for path in PUBLIC.rglob("*"):
-        if path.is_file() and (path.suffix==".md" or path.name in {"LICENSE",".gitignore","install-linux.sh"}):
+        if path.is_file() and (path.suffix==".md" or path.name in {"LICENSE",".gitignore","install-linux.sh"}
+                               or path.relative_to(PUBLIC)==Path("docs/media/wiztree-preview.png")):
             if path.is_symlink():raise RuntimeError("Unexpected public template symlink")
             relative=path.relative_to(PUBLIC)
             for dest in [tree/relative,tree/"packaging"/"public"/relative]:

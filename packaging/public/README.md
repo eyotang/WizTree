@@ -2,6 +2,12 @@
 
 原生磁盘空间分析工具，采用 Rust 与 GPUI Kit 开发。提供目录树、文件列表、类型统计和矩形空间图，支持 Windows、macOS 和 Linux 的独立扫描后端。
 
+## 界面预览
+
+![WizTree 界面预览](docs/media/wiztree-preview.png)
+
+*截图使用固定的虚构演示数据；磁盘、容量和文件名均为示例，不包含本机目录或个人信息。*
+
 ## 安装
 
 - **Windows**：解压对应 ZIP，双击 `WizTree.exe`。

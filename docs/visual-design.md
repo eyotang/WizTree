@@ -13,3 +13,5 @@
 可用 `cargo run -p wiztree-desktop --features appearance-smoke -- <示例目录> --smoke-appearance` 生成实际原生渲染截图。设置 `WIZTREE_SMOKE_OUTPUT` 为已有输出目录，并用 `WIZTREE_STATE_DIR` 指向独立测试设置目录，避免影响日常偏好。该入口仅在显式启用验收功能时编译。
 
 Windows 已检查浅/深色、展开筛选、文件类型与复核页签，以及 1060 像素宽窗口；macOS/Linux 的原生显示仍需对应系统验收。
+
+README 图片额外传入 `--readme-preview`，使用内存中的固定演示快照与虚拟磁盘容量，不读取本机文件来生成示例。正常扫描截图与演示截图应分别保存在独立输出目录。
