@@ -32,6 +32,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: distribution-${{ matrix.platform }}-${{ matrix.arch }}
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: |

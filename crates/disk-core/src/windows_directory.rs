@@ -169,8 +169,11 @@ fn parse_batch(
             .get(HEADER..end)
             .ok_or_else(|| invalid("Truncated directory filename"))?;
         let utf16: Vec<u16> = name
-            .chunks_exact(2)
-            .map(|v| u16::from_le_bytes([v[0], v[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
             .collect();
         if utf16.iter().any(|&v| matches!(v, 0 | 47 | 92)) {
             return Err(invalid("Invalid directory name component"));

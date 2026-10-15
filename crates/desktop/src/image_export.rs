@@ -231,12 +231,14 @@ mod tests {
         let pixels = &pixels[..info.buffer_size()];
         assert_eq!(&pixels[..3], &[255, 255, 255]);
         for color in colors {
-            assert!(pixels.chunks_exact(3).any(|pixel| pixel == color));
+            assert!(pixels.as_chunks::<3>().0.contains(&color));
         }
         assert!(
             pixels
-                .chunks_exact(3)
-                .filter(|pixel| *pixel != [255, 255, 255])
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .filter(|pixel| **pixel != [255, 255, 255])
                 .count()
                 > 13_000
         );

@@ -385,12 +385,17 @@ mod regression_tests {
             .collect();
         assert_eq!(relative_paths(&query, &rows(&query)), expected);
         assert!(rows(&query).iter().all(|row| row.depth == 0));
-        query.query = "*folder*nested.csv".into();
+        // A full path on macOS can start with /var/folders; address the
+        // fixture's exact directory component rather than that host prefix.
+        query.query = format!("{}*", query.snapshot.root.to_string_lossy());
+        assert_eq!(relative_paths(&query, &rows(&query)), expected);
+        let separator = std::path::MAIN_SEPARATOR;
+        query.query = format!("*{separator}folder{separator}nested.csv");
         assert_eq!(
             relative_paths(&query, &rows(&query)),
             HashSet::from([PathBuf::from("folder/nested.csv")])
         );
-        query.query = "folder".into();
+        query.query = format!("{separator}folder{separator}");
         query.match_paths = false;
         assert!(
             rows(&query).is_empty(),
@@ -402,7 +407,7 @@ mod regression_tests {
             HashSet::from([PathBuf::from("folder/nested.csv")])
         );
         query.query = "*.csv".into();
-        query.exclude = "*folder*".into();
+        query.exclude = format!("*{separator}folder{separator}*");
         assert_eq!(
             relative_paths(&query, &rows(&query)),
             ["root.csv", "other/nested.CSV"]

@@ -264,8 +264,11 @@ fn parse_record(record: &[u8], id: u64) -> io::Result<Option<Record>> {
                         .get(66..66 + length * 2)
                         .ok_or_else(|| invalid("Truncated UTF16 filename"))?;
                     let utf16: Vec<u16> = bytes
-                        .chunks_exact(2)
-                        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .copied()
+                        .map(u16::from_le_bytes)
                         .collect();
                     #[cfg(windows)]
                     let name = {
