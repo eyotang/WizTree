@@ -21,7 +21,7 @@ from release_icons import iconset
 ROOT=Path(__file__).resolve().parents[1]
 PUBLIC=ROOT/"packaging"/"public"
 VERSION=tomllib.loads((ROOT/"Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
-RELEASE_TOOLS=["build_release.py","package_release.py","verify_release.py","release_icons.py","verify_package.py"]
+RELEASE_TOOLS=["build_release.py","package_release.py","verify_release.py","release_icons.py","verify_package.py","verify_desktop.py"]
 
 def require_clean(path):
     result=audit(path)
