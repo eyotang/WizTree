@@ -174,60 +174,81 @@ impl DiskApp {
             bytes(plan.allocated),
             paths
         );
-        let response = window.prompt(
-            PromptLevel::Warning,
-            &format!("将 {} 个项目移到系统回收站？", plan.roots.len()),
-            Some(&detail),
-            &[
-                PromptButton::Cancel("取消".into()),
-                PromptButton::Ok("移到回收站".into()),
-            ],
-            cx,
-        );
+        let title = format!("将 {} 个项目移到系统回收站？", plan.roots.len());
+        let owner = cx.weak_entity();
         self.cleanup_busy = true;
-        cx.spawn_in(window, async move |app, cx| {
-            let confirmed = matches!(response.await, Ok(1));
-            let _ = app.update_in(cx, |app, _, cx| {
-                if !confirmed {
-                    app.cleanup_busy = false;
-                    cx.notify();
-                    return;
-                }
-                if !app
-                    .data
-                    .as_ref()
-                    .is_some_and(|data| Arc::ptr_eq(&data.snapshot, &snapshot))
-                {
-                    app.cleanup_busy = false;
-                    app.status = "扫描结果已更新，请重新选择项目".into();
-                    cx.notify();
-                    return;
-                }
-                let (tx, rx) = mpsc::channel();
-                app.cleanup_rx = Some(rx);
-                app.status = "正在移到系统回收站…".into();
-                std::thread::spawn(move || {
-                    let mut report = CleanupReport {
-                        snapshot: snapshot.clone(),
-                        succeeded: vec![],
-                        failed: vec![],
-                    };
-                    for id in plan.roots {
-                        let result = interaction::trash_target(&snapshot, id).and_then(|path| {
-                            trash::delete(path)
-                                .map_err(|error| std::io::Error::other(error.to_string()))
-                        });
-                        match result {
-                            Ok(()) => report.succeeded.push(id),
-                            Err(error) => report.failed.push((id, error.to_string())),
+        // Keep confirmation in the owning GPUI window. Native macOS sheets can
+        // survive programmatic parent removal and prevent NSApplication quitting.
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let confirm_owner = owner.clone();
+            let close_owner = owner.clone();
+            let snapshot = snapshot.clone();
+            let plan = plan.clone();
+            alert
+                .title(title.clone())
+                .description(
+                    div()
+                        .id("cleanup-confirmation-details")
+                        .max_h(px(280.))
+                        .overflow_y_scroll()
+                        .child(detail.clone()),
+                )
+                .width(px(520.))
+                .confirm()
+                .cancel_text("取消")
+                .ok_text("移到回收站")
+                .ok_variant(ButtonVariant::Danger)
+                .on_ok(move |_, _, cx| {
+                    let _ = confirm_owner.update(cx, |app, cx| {
+                        app.begin_cleanup(snapshot.clone(), plan.clone(), cx);
+                    });
+                    true
+                })
+                .on_close(move |_, _, cx| {
+                    let _ = close_owner.update(cx, |app, cx| {
+                        if app.cleanup_rx.is_none() {
+                            app.cleanup_busy = false;
                         }
-                    }
-                    let _ = tx.send(report);
+                        cx.notify();
+                    });
+                })
+        });
+        cx.notify();
+    }
+    fn begin_cleanup(&mut self, snapshot: Arc<Snapshot>, plan: MarkPlan, cx: &mut Context<Self>) {
+        if self.cleanup_rx.is_some() {
+            return;
+        }
+        if !self
+            .data
+            .as_ref()
+            .is_some_and(|data| Arc::ptr_eq(&data.snapshot, &snapshot))
+        {
+            self.cleanup_busy = false;
+            self.status = "扫描结果已更新，请重新选择项目".into();
+            cx.notify();
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.cleanup_rx = Some(rx);
+        self.status = "正在移到系统回收站…".into();
+        std::thread::spawn(move || {
+            let mut report = CleanupReport {
+                snapshot: snapshot.clone(),
+                succeeded: vec![],
+                failed: vec![],
+            };
+            for id in plan.roots {
+                let result = interaction::trash_target(&snapshot, id).and_then(|path| {
+                    trash::delete(path).map_err(|error| std::io::Error::other(error.to_string()))
                 });
-                cx.notify();
-            });
-        })
-        .detach();
+                match result {
+                    Ok(()) => report.succeeded.push(id),
+                    Err(error) => report.failed.push((id, error.to_string())),
+                };
+            }
+            let _ = tx.send(report);
+        });
         cx.notify();
     }
     fn poll_cleanup(&mut self, cx: &mut Context<Self>) {

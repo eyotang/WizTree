@@ -89,10 +89,25 @@ impl DiskApp {
             cx.background_executor().timer(Duration::from_millis(500)).await;
             interaction_smoke_stage("confirm");
             cx.background_executor().timer(Duration::from_millis(1700)).await;
+            app.update_in(cx,|app,window,cx| {
+                assert!(app.cleanup_rx.is_none(),"mutation ran without confirmation");
+                assert!(snapshot.path(leaf).exists()); assert!(snapshot.path(beta).exists());
+                assert!(window.has_active_dialog(cx),"cleanup confirmation is not owned by the window");
+            }).unwrap();
+            let escape=KeyDownEvent {keystroke:Keystroke {key:"escape".into(),..Default::default()},is_held:false,prefer_character_input:false};
+            cx.update(|window,cx| { window.dispatch_event(PlatformInput::KeyDown(escape),cx); }).unwrap();
+            cx.background_executor().timer(Duration::from_millis(150)).await;
+            app.update_in(cx,|app,window,cx| {
+                assert!(!app.cleanup_busy && app.cleanup_rx.is_none(),"cancel did not release cleanup state");
+                assert!(!window.has_active_dialog(cx));
+                app.confirm_trash(app.mark_plan.roots.clone(),window,cx);
+                assert!(app.cleanup_busy && window.has_active_dialog(cx));
+            }).unwrap();
+            cx.background_executor().timer(Duration::from_millis(150)).await;
             app.update_in(cx,|app,window,_| {
                 assert!(app.cleanup_rx.is_none(),"mutation ran without confirmation");
                 assert!(snapshot.path(leaf).exists()); assert!(snapshot.path(beta).exists());
-                eprintln!("[interaction-smoke] passed: selection, held-space, marks, history, scroll, depth, review, unconfirmed-cleanup; no filesystem mutations");
+                eprintln!("[interaction-smoke] passed: selection, held-space, marks, history, scroll, depth, review, cancel-and-reopen, close-with-confirmation; no filesystem mutations");
                 window.remove_window();
             }).unwrap();
         }).detach();
