@@ -37,11 +37,32 @@ def verify(executable, output):
             env["WIZTREE_SMOKE_OUTPUT"] = str(stage)
             env["WIZTREE_DIAGNOSTICS"] = "1"
             env["RUST_BACKTRACE"] = "1"
-            result = subprocess.run([str(executable), str(fixture), flag, "--workers=4"],
-                                    env=env, capture_output=True, timeout=60)
-            log = (result.stdout + result.stderr).decode("utf-8", errors="replace")
-            if result.returncode != 0 or marker not in log:
-                raise RuntimeError(f"Native desktop check {name} failed (exit {result.returncode}):\n{log[-8000:]}")
+            # Native services may inherit stdout/stderr handles. Wait for the
+            # owned application itself; inherited pipes must not hold CI open.
+            log_path = stage / "native.log"
+            timed_out = False
+            with log_path.open("wb") as stream:
+                process = subprocess.Popen([str(executable), str(fixture), flag, "--workers=4"],
+                                           env=env, stdout=stream, stderr=subprocess.STDOUT)
+                try:
+                    process.wait(timeout=60)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    if sys.platform == "darwin":
+                        sample = stage / "sample.txt"
+                        try:
+                            subprocess.run(["/usr/bin/sample", str(process.pid), "1", "1", "-file", str(sample)],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+                            if sample.exists():
+                                print(sample.read_text(errors="replace")[:12000], flush=True)
+                        except (OSError, subprocess.TimeoutExpired) as error:
+                            print(f"Native timeout sample unavailable: {error}", flush=True)
+                    process.kill()
+                    process.wait(timeout=10)
+            log = log_path.read_text(encoding="utf-8", errors="replace")
+            if timed_out or process.returncode != 0 or marker not in log:
+                last_stage = (stage / "stage").read_text() if (stage / "stage").exists() else "not reached"
+                raise RuntimeError(f"Native desktop check {name} failed (exit {process.returncode}, timeout {timed_out}, stage {last_stage}):\n{log[-8000:]}")
             actual = {p.relative_to(fixture).as_posix(): p.stat().st_size
                       for p in fixture.rglob("*") if p.is_file()}
             if actual != expected:
