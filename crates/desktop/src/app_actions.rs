@@ -1,6 +1,10 @@
 impl DiskApp {
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.folder_picker_open || self.job.is_some() || self.cleanup_busy {
+        if self.folder_picker_open
+            || self.job.is_some()
+            || self.cleanup_busy
+            || self.elevation_pending()
+        {
             return;
         }
         // A synchronous native modal loop can re-enter GPUI while this entity
@@ -294,7 +298,7 @@ impl DiskApp {
         let owner = cx.weak_entity();
         let strategy = self.scan_strategy;
         quiet_button("scan-method", cx)
-            .disabled(self.job.is_some())
+            .disabled(self.job.is_some() || self.cleanup_busy || self.elevation_pending())
             .label(match strategy {
                 ScanStrategy::Auto => "自动",
                 ScanStrategy::Directory => "目录",
@@ -313,6 +317,15 @@ impl DiskApp {
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |app, cx| {
                                 app.scan_strategy = method;
+                                #[cfg(windows)]
+                                {
+                                    app.preferences.prefer_mft = method == ScanStrategy::NtfsMft;
+                                    let preferences = app.preferences.clone();
+                                    std::thread::spawn(move || { let _ = storage::save_preferences(&preferences); });
+                                    if method == ScanStrategy::NtfsMft {
+                                        app.status = "已选择 MFT：支持整盘和文件夹，扫描时按需请求管理员权限".into();
+                                    }
+                                }
                                 cx.notify();
                             });
                         }),
@@ -325,6 +338,7 @@ impl DiskApp {
         let owner = cx.weak_entity();
         let ready = self.data.is_some();
         quiet_button("file-menu", cx)
+            .disabled(self.elevation_pending())
             .label("文件")
             .dropdown_menu(move |menu, _, _| {
                 let mut menu = menu;
@@ -862,7 +876,7 @@ fn scan_methods() -> &'static [(&'static str, ScanStrategy)] {
             ("自动：文件夹批量读取，整卷尝试 MFT", ScanStrategy::Auto),
             ("目录：批量读取，无需管理员权限", ScanStrategy::Directory),
             (
-                "MFT（实验）：读取整卷元数据，需要卷读取权限",
+                "MFT（实验）：整盘 / 文件夹，按需请求管理员权限",
                 ScanStrategy::NtfsMft,
             ),
         ]

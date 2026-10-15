@@ -3,6 +3,8 @@ extern crate gpui_kit as gpui;
 mod app;
 mod appearance;
 mod branding;
+#[cfg(windows)]
+mod elevation;
 mod image_export;
 mod interaction;
 mod query;
@@ -14,7 +16,8 @@ fn main() {
     // Resolve hardware concurrency before platform initialization/thread affinity
     // changes, so UI and CLI use the same default I/O worker budget.
     let mut scan_options = disk_core::ScanOptions::default();
-    if let Some(workers) = std::env::args()
+    if let Some(workers) = std::env::args_os()
+        .filter_map(|arg| arg.into_string().ok())
         .find_map(|arg| {
             arg.strip_prefix("--workers=")
                 .and_then(|v| v.parse::<usize>().ok())
@@ -74,7 +77,18 @@ fn main() {
                 ))),
                 window_min_size: Some(size(px(1060.), px(720.))),
                 titlebar: Some(TitlebarOptions {
-                    title: Some("WizTree · 快速空间分析".into()),
+                    title: Some({
+                        #[cfg(windows)]
+                        let administrator = elevation::is_elevated().unwrap_or(false);
+                        #[cfg(not(windows))]
+                        let administrator = false;
+                        if administrator {
+                            "WizTree · 管理员 · 快速空间分析"
+                        } else {
+                            "WizTree · 快速空间分析"
+                        }
+                        .into()
+                    }),
                     ..Default::default()
                 }),
                 ..Default::default()

@@ -494,6 +494,7 @@ fn replace(temporary: &Path, destination: &Path) -> io::Result<()> {
 pub struct Preferences {
     pub recent: Vec<PathBuf>,
     pub dark: Option<bool>,
+    pub prefer_mft: bool,
 }
 fn preferences_path() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("WIZTREE_STATE_DIR").filter(|v| !v.is_empty()) {
@@ -530,12 +531,13 @@ pub fn save_scan_diagnostics(
     workers: usize,
     progress: disk_core::ProgressSnapshot,
     index_elapsed: Duration,
+    strategy: disk_core::ScanStrategy,
 ) -> io::Result<()> {
     let path = preferences_path()?.with_file_name("last-scan.json");
     let io = progress.directory_io;
-    let report = serde_json::json!({
-        "version": 1,
-        "build": "2026-10-15-native-platform-backends",
+    let mut report = serde_json::json!({
+        "version": 2,
+        "build": "2026-10-15-full-directory-info-uac",
         "backend": if snapshot.method == ScanMethod::NtfsMft { "windows-ntfs-mft" } else { disk_core::directory_backend() },
         "finished_utc": Utc::now().to_rfc3339(),
         "method": snapshot.method.to_string(),
@@ -571,6 +573,14 @@ pub fn save_scan_diagnostics(
         "fallback_reason": snapshot.fallback_reason,
         "time_note": "Worker times are summed across concurrent threads; cache state was not measured.",
     });
+    report["app_version"] = env!("CARGO_PKG_VERSION").into();
+    report["scan_root"] = serde_json::to_value(&snapshot.root).map_err(io::Error::from)?;
+    report["requested_strategy"] = format!("{strategy:?}").into();
+    #[cfg(windows)]
+    {
+        report["process_elevated"] =
+            serde_json::to_value(crate::elevation::is_elevated().ok()).map_err(io::Error::from)?;
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -755,6 +765,7 @@ mod tests {
         let fixture = Fixture::new();
         let path = fixture.0.join("state/preferences.json");
         let preferences = Preferences {
+            prefer_mft: true,
             recent: vec![fixture.0.clone(), fixture.0.clone()],
             dark: Some(true),
         };
@@ -762,6 +773,9 @@ mod tests {
         let restored = read_preferences(&path).unwrap();
         assert_eq!(restored.recent, vec![fixture.0.clone()]);
         assert_eq!(restored.dark, Some(true));
+        assert!(restored.prefer_mft);
+        fs::write(&path, br#"{"recent":[],"dark":false}"#).unwrap();
+        assert!(!read_preferences(&path).unwrap().prefer_mft);
     }
     #[cfg(windows)]
     #[test]

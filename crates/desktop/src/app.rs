@@ -156,6 +156,8 @@ pub struct DiskApp {
     job: Option<ScanJob>,
     folder_picker_open: bool,
     folder_picker_task: Option<Task<()>>,
+    #[cfg(windows)]
+    elevation_rx: Option<mpsc::Receiver<Result<(), String>>>,
     scan_strategy: ScanStrategy,
     scan_options: ScanOptions,
     query_tx: mpsc::SyncSender<query::Query>,
@@ -189,7 +191,9 @@ impl DiskApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let arguments: Vec<String> = std::env::args().collect();
+        let arguments: Vec<String> = std::env::args_os()
+            .filter_map(|argument| argument.into_string().ok())
+            .collect();
         let initial_filter = arguments
             .iter()
             .find_map(|a| a.strip_prefix("--filter="))
@@ -401,9 +405,12 @@ impl DiskApp {
             folder_picker_open: false,
             folder_picker_task: None,
             scan_options,
+            #[cfg(windows)]
+            elevation_rx: None,
             scan_strategy: match arguments.iter().find_map(|a| a.strip_prefix("--method=")) {
                 Some("mft") => ScanStrategy::NtfsMft,
                 Some("directory") => ScanStrategy::Directory,
+                None if cfg!(windows) && preferences.prefer_mft => ScanStrategy::NtfsMft,
                 _ => ScanStrategy::Auto,
             },
             query_tx,
@@ -462,8 +469,18 @@ impl DiskApp {
         }
         app
     }
+    fn elevation_pending(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.elevation_rx.is_some()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
     fn start_scan(&mut self, cx: &mut Context<Self>) {
-        if self.job.is_some() || self.cleanup_busy {
+        if self.job.is_some() || self.cleanup_busy || self.elevation_pending() {
             return;
         }
         let path = PathBuf::from(self.path.read(cx).value().as_str());
@@ -471,6 +488,50 @@ impl DiskApp {
             self.status = "请先选择分析目标".into();
             cx.notify();
             return;
+        }
+        #[cfg(windows)]
+        if self.scan_strategy == ScanStrategy::NtfsMft {
+            match crate::elevation::is_elevated() {
+                Ok(false) => {
+                    let (tx, rx) = mpsc::channel();
+                    let workers = self.scan_options.workers;
+                    self.elevation_rx = Some(rx);
+                    self.status = "正在准备管理员扫描，将在新窗口扫描所选文件夹…".into();
+                    std::thread::spawn(move || {
+                        let result = std::fs::canonicalize(&path)
+                            .and_then(|path| {
+                                crate::elevation::is_local_ntfs_directory(&path).and_then(
+                                    |supported| {
+                                        if supported {
+                                            crate::elevation::launch_mft_scan(&path, workers)
+                                        } else {
+                                            Err(std::io::Error::new(
+                                                std::io::ErrorKind::Unsupported,
+                                                "MFT 仅适用于本地 NTFS 文件夹，请选择目录扫描",
+                                            ))
+                                        }
+                                    },
+                                )
+                            })
+                            .map_err(|error| {
+                                if error.raw_os_error() == Some(1223) {
+                                    "已取消管理员授权，原有结果已保留".to_string()
+                                } else {
+                                    format!("无法启动管理员扫描：{error}")
+                                }
+                            });
+                        let _ = tx.send(result);
+                    });
+                    cx.notify();
+                    return;
+                }
+                Ok(true) => {}
+                Err(error) => {
+                    self.status = format!("无法检查管理员权限：{error}");
+                    cx.notify();
+                    return;
+                }
+            }
         }
         self.clear_scan_results(cx);
         let cancel = Arc::new(AtomicBool::new(false));
@@ -498,7 +559,7 @@ impl DiskApp {
                 let index = Arc::new(AnalysisIndex::new(&s));
                 let index_elapsed = indexing_started.elapsed();
                 if let Err(error) = storage::save_scan_diagnostics(
-                    &s, options.workers, worker_progress.snapshot(), index_elapsed,
+                    &s, options.workers, worker_progress.snapshot(), index_elapsed, strategy,
                 ) {
                     eprintln!("[diagnostics] {error}");
                 }
@@ -539,6 +600,30 @@ impl DiskApp {
     }
     /// A new scan owns the result area immediately. Invalidate work before
     /// dropping its snapshot so late background replies cannot restore old rows.
+    #[cfg(windows)]
+    fn poll_elevation(&mut self, cx: &mut Context<Self>) {
+        let result = self
+            .elevation_rx
+            .as_ref()
+            .and_then(|rx| match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("管理员启动任务已停止，原有结果已保留".into()))
+                }
+            });
+        if let Some(result) = result {
+            self.elevation_rx = None;
+            match result {
+                Ok(()) => {
+                    self.clear_scan_results(cx);
+                    self.status = "已在管理员窗口开始 MFT 扫描；此窗口仍保留，可关闭".into();
+                }
+                Err(error) => self.status = error,
+            }
+            cx.notify();
+        }
+    }
     fn clear_scan_results(&mut self, cx: &mut Context<Self>) {
         self.query_version.fetch_add(1, Ordering::Relaxed);
         self.map_version += 1;
@@ -586,6 +671,8 @@ impl DiskApp {
         });
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
+        #[cfg(windows)]
+        self.poll_elevation(cx);
         self.poll_cleanup(cx);
         if let Some(job) = &mut self.job {
             if std::env::var_os("WIZTREE_DIAGNOSTICS").is_some() {

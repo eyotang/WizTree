@@ -78,6 +78,27 @@ impl DiskApp {
                 app.request_map(cx);
             }).unwrap();
             cx.background_executor().timer(Duration::from_millis(500)).await;
+            #[cfg(windows)]
+            app.update_in(cx, |app, _, cx| {
+                let original = app.data.as_ref().unwrap().snapshot.clone();
+                let (tx, rx) = mpsc::channel();
+                app.elevation_rx = Some(rx);
+                assert!(app.elevation_pending());
+                app.start_scan(cx);
+                assert!(app.job.is_none(), "duplicate scan started during UAC");
+                tx.send(Err("已取消管理员授权，原有结果已保留".into())).unwrap();
+                app.poll_elevation(cx);
+                assert!(!app.elevation_pending());
+                assert!(Arc::ptr_eq(&original, &app.data.as_ref().unwrap().snapshot));
+                assert!(app.status.contains("取消管理员授权"));
+                let (tx, rx) = mpsc::channel();
+                app.elevation_rx = Some(rx);
+                drop(tx);
+                app.poll_elevation(cx);
+                assert!(!app.elevation_pending());
+                assert!(Arc::ptr_eq(&original, &app.data.as_ref().unwrap().snapshot));
+                eprintln!("[interaction-smoke] UAC cancellation preserves snapshot and rejects duplicate starts");
+            }).unwrap();
             interaction_smoke_stage("map");
             cx.background_executor().timer(Duration::from_millis(1700)).await;
             app.update_in(cx,|app,window,cx| {

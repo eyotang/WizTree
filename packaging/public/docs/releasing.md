@@ -59,7 +59,7 @@ xattr -dr com.apple.quarantine "/Applications/WizTree.app"
 面向 Ubuntu 24.04 及以上的 x86_64 系统，发布原生 `.deb`，由包管理器处理运行依赖及桌面入口，无需 install.sh。
 
 ```sh
-sudo apt install ./WizTree-0.1.1-ubuntu-amd64.deb
+sudo apt install ./WizTree-0.1.2-ubuntu-amd64.deb
 ```
 
 安装后从应用列表打开 WizTree，也可运行 `wiztree`。下载新版 DEB 后使用相同命令升级；卸载：
@@ -75,3 +75,13 @@ sudo apt remove wiztree
 三端使用同一空间图标识。Windows EXE 嵌入多尺寸 ICO 及中性版本信息；macOS `.app` 使用 ICNS；Ubuntu 安装 hicolor 图标与匹配应用标识的 desktop 入口，支持 Wayland 应用分组。主界面显示相同图标。
 
 主程序直接链接 `disk-core`，扫描在进程内后台线程运行，无需启动外部 EXE。`disk-scan` 仅用于开发、脚本和 CI 验收，不随桌面安装包分发。
+
+## Windows 管理员与 MFT 模式
+
+默认以普通用户权限打开。扫描方式选择“MFT”，再点击“扫描”，程序会先检查目标是本地 NTFS 目录；需要卷读取权限时通过 Windows UAC 请求授权，在新的管理员窗口扫描。管理员窗口在标题中显示身份，原窗口保留；取消 UAC 不清空原结果，也不会重复启动扫描。
+
+MFT 可以用于整盘或所选文件夹。分析文件夹时需要先读取卷元数据，再筛选该目录的子树；小目录不保证比目录扫描更快。普通“自动/目录”模式仍可直接扫描，无需提权。无法使用 MFT 时显示具体回退原因。
+
+Windows 普通目录后端使用 FILE_FULL_DIR_INFO，避免请求未使用的文件 ID 和 DOS 短名。[微软结构说明](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_full_dir_info)解释了两种元数据查询的读取范围差异。
+
+最近一次本地扫描诊断写入用户配置目录的 last-scan.json，记录版本、目标目录、权限、模式和阶段耗时；它不会上传，也不作为结果数据库。比较性能时需同时核对权限、实际后端、文件数量和缓存状态。

@@ -1,5 +1,6 @@
 //! Batched Windows directory metadata: one handle per directory, not per file.
-//! FILE_ID_BOTH_DIR_INFO layout follows the Windows SDK (FileName offset 104).
+//! FILE_FULL_DIR_INFO layout follows the Windows SDK (FileName offset 68).
+//! File IDs and DOS short names are not used by the snapshot, so avoid querying them.
 use super::*;
 use std::{
     ffi::c_void,
@@ -117,7 +118,9 @@ impl Reader {
         }
     }
 }
-const HEADER: usize = 104;
+const HEADER: usize = 68;
+const DIRECTORY_RESTART: i32 = 15; // FileFullDirectoryRestartInfo
+const DIRECTORY_CONTINUE: i32 = 14; // FileFullDirectoryInfo
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -222,7 +225,7 @@ impl Reader {
         }
         let directory = std::sync::Arc::new(directory?);
         let words = &mut self.words;
-        let mut class = 11; // FileIdBothDirectoryRestartInfo, then continuation 10.
+        let mut class = DIRECTORY_RESTART;
         let mut delivered = false;
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -257,7 +260,7 @@ impl Reader {
                     _ => return Err(error),
                 }
             }
-            class = 10;
+            class = DIRECTORY_CONTINUE;
             delivered = true;
             // SAFETY: all allocated words are initialized; the checked chain parser
             // only consumes the records returned by the successful kernel call.
@@ -340,7 +343,7 @@ mod tests {
             unsafe {
                 GetFileInformationByHandleEx(
                     child.as_raw_handle(),
-                    11,
+                    DIRECTORY_RESTART,
                     words.as_mut_ptr().cast(),
                     65536,
                 )

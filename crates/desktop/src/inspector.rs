@@ -242,7 +242,13 @@ impl DiskApp {
                         IconName::Plus
                     })
                     .tooltip("Space 标记或取消标记，文件不会被修改")
-                    .disabled(id == 0 || inherited || self.cleanup_busy || self.job.is_some())
+                    .disabled(
+                        id == 0
+                            || inherited
+                            || self.cleanup_busy
+                            || self.job.is_some()
+                            || self.elevation_pending(),
+                    )
                     .label(if inherited {
                         "已随父目录标记"
                     } else if exact {
@@ -412,7 +418,7 @@ impl DiskApp {
                     } else {
                         "移到系统回收站…"
                     })
-                    .disabled(self.cleanup_busy || self.job.is_some())
+                    .disabled(self.cleanup_busy || self.job.is_some() || self.elevation_pending())
                     .on_click(cx.listener(|app, _, window, cx| {
                         app.confirm_trash(app.mark_plan.roots.clone(), window, cx)
                     })),

@@ -1,7 +1,7 @@
 // Kept in the app module so all view callbacks share the application's actions.
 impl DiskApp {
     fn view_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let scanning = self.job.is_some() || self.cleanup_busy;
+        let scanning = self.job.is_some() || self.cleanup_busy || self.elevation_pending();
         div()
             .flex()
             .items_center()
@@ -70,7 +70,14 @@ impl DiskApp {
                     } else {
                         IconName::Play
                     })
-                    .label(if scanning { "停止" } else { "扫描" })
+                    .label(if self.elevation_pending() {
+                        "授权中…"
+                    } else if scanning {
+                        "停止"
+                    } else {
+                        "扫描"
+                    })
+                    .disabled(self.elevation_pending() || self.cleanup_busy)
                     .on_click(cx.listener(|app, _, window, cx| {
                         if app.job.is_some() {
                             app.cancel(&CancelScan, window, cx);

@@ -88,7 +88,7 @@ impl DiskApp {
         }
     }
     fn edit_location(&mut self, _: &EditLocation, window: &mut Window, cx: &mut Context<Self>) {
-        if self.cleanup_busy || self.job.is_some() {
+        if self.cleanup_busy || self.job.is_some() || self.elevation_pending() {
             return;
         }
         self.path_editing = true;
@@ -114,7 +114,7 @@ impl DiskApp {
         }
     }
     pub fn toggle_mark(&mut self, id: usize, cx: &mut Context<Self>) {
-        if self.cleanup_busy || self.job.is_some() || id == 0 {
+        if self.cleanup_busy || self.job.is_some() || self.elevation_pending() || id == 0 {
             return;
         }
         let Some(data) = &self.data else {
@@ -150,7 +150,7 @@ impl DiskApp {
         cx.notify();
     }
     fn confirm_trash(&mut self, ids: Vec<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.cleanup_busy || self.job.is_some() {
+        if self.cleanup_busy || self.job.is_some() || self.elevation_pending() {
             return;
         }
         let Some(data) = &self.data else {
