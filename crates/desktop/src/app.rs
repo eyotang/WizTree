@@ -72,6 +72,7 @@ struct ScanJob {
     progress: Arc<Progress>,
     rx: mpsc::Receiver<Result<Data, String>>,
     started: Instant,
+    diagnostic_tick: u64,
 }
 struct QueryResult {
     version: u64,
@@ -531,6 +532,7 @@ impl DiskApp {
             progress,
             rx,
             started: Instant::now(),
+            diagnostic_tick: 0,
         });
         self.status = "正在读取文件元数据…".into();
         cx.notify();
@@ -585,7 +587,29 @@ impl DiskApp {
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
         self.poll_cleanup(cx);
-        if let Some(job) = &self.job {
+        if let Some(job) = &mut self.job {
+            if std::env::var_os("WIZTREE_DIAGNOSTICS").is_some() {
+                let tick = job.started.elapsed().as_secs() / 2 + 1;
+                if tick != job.diagnostic_tick {
+                    job.diagnostic_tick = tick;
+                    let p = job.progress.snapshot();
+                    let io = p.directory_io;
+                    eprintln!(
+                        "[scan-progress] elapsed_ms={:.3} files={} dirs={} opens={} queries={} enumerate_ms={:.3} publish_wait_ms={:.3} publish_ms={:.3} allocate_ms={:.3} job_drop_ms={:.3} worker_start_ms={:.3}",
+                        job.started.elapsed().as_secs_f64() * 1000.,
+                        p.files,
+                        p.dirs,
+                        io.opens,
+                        io.queries,
+                        io.enumerate_ns as f64 / 1e6,
+                        io.publish_wait_ns as f64 / 1e6,
+                        io.publish_ns as f64 / 1e6,
+                        io.entry_allocate_ns as f64 / 1e6,
+                        io.job_drop_ns as f64 / 1e6,
+                        io.worker_start_delay_ns as f64 / 1e6
+                    );
+                }
+            }
             match job.rx.try_recv() {
                 Ok(result) => {
                     self.job = None;

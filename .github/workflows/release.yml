@@ -67,6 +67,17 @@ jobs:
           import subprocess
           import sys
           subprocess.run([sys.executable, 'tools/package_release.py', '--source', '--platform', os.environ['PACKAGE_PLATFORM'], '--arch', os.environ['PACKAGE_ARCH'], '--binary-dir', os.environ['BINARY_DIRECTORY']], check=True)
+      - name: Verify extracted native package
+        shell: python
+        env:
+          BINARY_DIRECTORY: ${{ steps.build.outputs.directory }}
+          PACKAGE_PLATFORM: ${{ matrix.platform }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          import os
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, 'tools/verify_package.py', '--platform', os.environ['PACKAGE_PLATFORM'], '--arch', os.environ['PACKAGE_ARCH'], '--binary-dir', os.environ['BINARY_DIRECTORY']], check=True)
       - name: Upload reviewable packages
         uses: actions/upload-artifact@v7
         with:
@@ -77,4 +88,5 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS.txt
             dist/release-audit-*.json
+            dist/package-validation-*.json
           if-no-files-found: error
