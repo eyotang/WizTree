@@ -1,0 +1,8 @@
+/target/
+/dist/
+__pycache__/
+*.pyc
+*.pdb
+.DS_Store
+.idea/
+.vscode/

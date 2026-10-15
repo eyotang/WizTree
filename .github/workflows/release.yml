@@ -1,0 +1,77 @@
+name: Build distribution packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+            arch: x86_64
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x86_64
+          - runner: macos-15
+            platform: macos
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxrandr-dev libxi-dev libxcursor-dev libgl1-mesa-dev libvulkan-dev libssl-dev libdbus-1-dev
+      - name: Native scanner and UI regression tests
+        run: cargo test --locked --workspace
+      - name: Strict compiler checks
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Build privacy-remapped binaries
+        id: build
+        shell: python
+        run: |
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()/'tools'))
+          from build_release import build
+          output = build()
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as stream:
+              stream.write(f'directory={output}\n')
+      - name: Package source and native application
+        shell: python
+        env:
+          BINARY_DIRECTORY: ${{ steps.build.outputs.directory }}
+          PACKAGE_PLATFORM: ${{ matrix.platform }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          import os
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, 'tools/package_release.py', '--source', '--platform', os.environ['PACKAGE_PLATFORM'], '--arch', os.environ['PACKAGE_ARCH'], '--binary-dir', os.environ['BINARY_DIRECTORY']], check=True)
+      - name: Upload reviewable packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: WizTree-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+            dist/release-audit-*.json
+          if-no-files-found: error
