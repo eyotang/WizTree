@@ -1,4 +1,5 @@
 use crate::{
+    appearance::{chrome, quiet_button, toggle_button},
     interaction::{self, History, MarkPlan},
     query::{self, Metric, Mode, Row, SortKey},
     storage,
@@ -8,9 +9,11 @@ use crate::{
 use disk_core::{AnalysisIndex, Progress, ScanOptions, ScanStrategy, Snapshot, VolumeInfo};
 use gpui_kit::component::{
     button::*,
+    checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     resizable::{h_resizable, resizable_panel, v_resizable},
+    tab::{Tab, TabBar},
     table::{DataTable, TableEvent, TableState},
     *,
 };
@@ -173,6 +176,7 @@ pub struct DiskApp {
     volumes_rx: mpsc::Receiver<std::io::Result<Vec<VolumeInfo>>>,
     preferences: storage::Preferences,
     dark: bool,
+    show_filter_options: bool,
     show_types: bool,
     show_map: bool,
     status: String,
@@ -216,8 +220,8 @@ impl DiskApp {
                 .placeholder("文件名或通配符，例如 *.zip")
                 .default_value(initial_filter)
         });
-        let minimum = cx.new(|cx| InputState::new(window, cx).placeholder("最小大小：100 MB"));
-        let exclude = cx.new(|cx| InputState::new(window, cx).placeholder("排除：*.tmp"));
+        let minimum = cx.new(|cx| InputState::new(window, cx).placeholder("例如 100 MB"));
+        let exclude = cx.new(|cx| InputState::new(window, cx).placeholder("例如 *.tmp"));
         let owner = cx.weak_entity();
         let table = cx.new(|inner| {
             TableState::new(Explorer::new(owner.clone()), window, inner)
@@ -361,7 +365,7 @@ impl DiskApp {
             sidebar_tab: SidebarTab::Details,
             map_only: false,
             map_depth: 3,
-            motion_enabled: true,
+            motion_enabled: !cx.reduce_motion(),
             path_editing: false,
             history: History::default(),
             pending_scroll: None,
@@ -420,6 +424,7 @@ impl DiskApp {
             volumes_rx,
             preferences,
             dark,
+            show_filter_options: false,
             show_types: true,
             show_map: true,
             status: "选择磁盘或文件夹，查看目录树、文件类型和空间分布".into(),
@@ -444,6 +449,10 @@ impl DiskApp {
             .any(|argument| argument == "--smoke-scan-reset")
         {
             Self::schedule_scan_reset_smoke(window, cx);
+        }
+        #[cfg(feature = "appearance-smoke")]
+        if arguments.iter().any(|a| a == "--smoke-appearance") {
+            Self::schedule_appearance_smoke(window, cx);
         }
         if let Some(path) = arguments.iter().find_map(|a| a.strip_prefix("--load=")) {
             app.load_file(PathBuf::from(path), cx);
@@ -872,3 +881,6 @@ include!("interaction_smoke.rs");
 
 #[cfg(feature = "interaction-smoke")]
 include!("scan_reset_smoke.rs");
+
+#[cfg(feature = "appearance-smoke")]
+include!("appearance_smoke.rs");

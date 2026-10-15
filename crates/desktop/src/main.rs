@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 extern crate gpui_kit as gpui;
 mod app;
+mod appearance;
 mod image_export;
 mod interaction;
 mod query;

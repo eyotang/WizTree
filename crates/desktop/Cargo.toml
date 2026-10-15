@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 gpui-kit = "=0.7.3"
+# Enable the scene readback API only in the visual verification executable.
+gpui-visual = { package = "gpui-pre-platform", version = "=0.3.9", default-features = false, features = ["test-support"], optional = true }
 disk-core = { path = "../disk-core" }
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
@@ -21,3 +23,5 @@ path = "src/main.rs"
 [features]
 dialog-smoke = []
 interaction-smoke = []
+
+appearance-smoke = ["dep:gpui-visual"]

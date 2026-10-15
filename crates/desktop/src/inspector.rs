@@ -1,35 +1,45 @@
 impl DiskApp {
     fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut header = div()
+        let header = div()
+            .h(px(46.))
+            .px_4()
             .flex()
             .items_center()
-            .gap_1()
-            .h(px(40.))
-            .px_2()
             .flex_shrink_0()
+            .bg(cx.theme().background)
             .border_b_1()
-            .border_color(cx.theme().border);
-        for (id, label, tab) in [
-            ("side-details", "详情".to_string(), SidebarTab::Details),
-            ("side-types", "文件类型".to_string(), SidebarTab::Types),
-            (
-                "side-review",
-                format!("复核 {}", self.marked.len()),
-                SidebarTab::Review,
-            ),
-        ] {
-            header = header.child(
-                Button::new(id)
+            .border_color(cx.theme().border)
+            .child(
+                TabBar::new("inspector-tabs")
                     .small()
-                    .ghost()
-                    .selected(self.sidebar_tab == tab)
-                    .label(label)
-                    .on_click(cx.listener(move |app, _, _, cx| {
-                        app.sidebar_tab = tab;
+                    .underline()
+                    .selected_index(match self.sidebar_tab {
+                        SidebarTab::Details => 0,
+                        SidebarTab::Types => 1,
+                        SidebarTab::Review => 2,
+                    })
+                    .child(Tab::new().label("详情"))
+                    .child(Tab::new().label("文件类型"))
+                    .child(
+                        Tab::new().label("复核").suffix(
+                            div()
+                                .px_1p5()
+                                .rounded_full()
+                                .text_xs()
+                                .bg(cx.theme().muted)
+                                .text_color(cx.theme().muted_foreground)
+                                .child(self.marked.len().to_string()),
+                        ),
+                    )
+                    .on_click(cx.listener(|app, index, _, cx| {
+                        app.sidebar_tab = match index {
+                            0 => SidebarTab::Details,
+                            1 => SidebarTab::Types,
+                            _ => SidebarTab::Review,
+                        };
                         cx.notify();
                     })),
             );
-        }
         let content = match self.sidebar_tab {
             SidebarTab::Details => self.selection_details(cx),
             SidebarTab::Types => div()
@@ -50,7 +60,7 @@ impl DiskApp {
                         DataTable::new(&self.types)
                             .with_size(px(28.))
                             .header_row_height(px(30.))
-                            .stripe(true)
+                            .stripe(false)
                             .bordered(false)
                             .scrollbar_visible(true, true),
                     ),
@@ -132,15 +142,14 @@ impl DiskApp {
             ("detail-copy", "复制路径", ItemAction::Copy),
             ("detail-locate", "定位到树表", ItemAction::Locate),
         ] {
-            buttons = buttons.child(Button::new(button).small().label(label).on_click(
+            buttons = buttons.child(quiet_button(button, cx).label(label).on_click(
                 cx.listener(move |app, _, window, cx| app.item_action(action, id, window, cx)),
             ));
         }
         if node.is_dir {
             buttons = buttons.child(
-                Button::new("detail-browse")
-                    .small()
-                    .primary()
+                quiet_button("detail-browse", cx)
+                    .icon(IconName::FolderOpen)
                     .label("进入目录")
                     .on_click(
                         cx.listener(move |app, _, window, cx| app.navigate_to(id, window, cx)),
@@ -225,17 +234,21 @@ impl DiskApp {
             .child(buttons)
             .child(div().h(px(1.)).w_full().my_4().bg(cx.theme().border))
             .child(
-                Button::new("detail-mark")
-                    .small()
+                toggle_button("detail-mark", exact || inherited, cx)
                     .w_full()
-                    .selected(exact)
+                    .icon(if exact || inherited {
+                        IconName::CircleCheck
+                    } else {
+                        IconName::Plus
+                    })
+                    .tooltip("Space 标记或取消标记，文件不会被修改")
                     .disabled(id == 0 || inherited || self.cleanup_busy || self.job.is_some())
                     .label(if inherited {
                         "已随父目录标记"
                     } else if exact {
-                        "取消标记"
+                        "已加入复核 · 点击取消"
                     } else {
-                        "标记以便复核 · Space"
+                        "加入复核"
                     })
                     .on_click(cx.listener(move |app, _, _, cx| app.toggle_mark(id, cx))),
             )

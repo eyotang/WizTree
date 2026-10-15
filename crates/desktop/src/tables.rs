@@ -4,7 +4,7 @@ use crate::{
 };
 use disk_core::{AnalysisIndex, Snapshot};
 use gpui_kit::component::{
-    button::*,
+    checkbox::Checkbox,
     menu::{PopupMenu, PopupMenuItem},
     table::*,
     *,
@@ -157,13 +157,17 @@ impl TableDelegate for Explorer {
         let id = entry.id;
         div()
             .id(("row", id))
+            .border_l_2()
+            .border_color(cx.theme().transparent)
             .when(
                 self.snapshot
                     .as_ref()
                     .is_some_and(|s| crate::interaction::covered(s, &self.marked, id)),
                 |d| d.bg(cx.theme().warning.opacity(0.12)),
             )
-            .when(self.selected == id, |d| d.bg(cx.theme().selection))
+            .when(self.selected == id, |d| {
+                d.bg(cx.theme().selection).border_color(cx.theme().primary)
+            })
     }
     fn render_td(
         &mut self,
@@ -201,13 +205,17 @@ impl TableDelegate for Explorer {
                     let mark_owner = self.owner.clone();
                     let exact = self.marked.contains(&id);
                     let inherited = !exact && crate::interaction::covered(s, &self.marked, id);
-                    Button::new(("mark-row", id))
+                    Checkbox::new(("mark-row", id))
                         .small()
-                        .ghost()
-                        .compact()
-                        .w(px(20.))
-                        .h(px(20.))
-                        .label(if exact || inherited { "✓" } else { "○" })
+                        .w(px(22.))
+                        .h(px(22.))
+                        .checked(exact || inherited)
+                        .accessibility_label("标记以便复核")
+                        .tooltip(if inherited {
+                            "已随父目录标记"
+                        } else {
+                            "标记以便复核 · Space"
+                        })
                         .disabled(id == 0 || inherited)
                         .on_click(move |_, _, cx| {
                             cx.stop_propagation();
@@ -255,7 +263,10 @@ impl TableDelegate for Explorer {
                     }),
                 )
                 .child(div().min_w_0().truncate().child(if entry.id == 0 {
-                    pretty_path(&s.root)
+                    s.root
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| pretty_path(&s.root))
                 } else {
                     node.name.to_string_lossy().into_owned()
                 }))

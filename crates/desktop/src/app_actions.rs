@@ -200,6 +200,8 @@ impl DiskApp {
         }
         self.extension = None;
         self.duplicates = false;
+        self.match_paths = false;
+        self.include_folders = false;
         self.request_query(cx);
     }
     fn go_up(&mut self, _: &GoUp, window: &mut Window, cx: &mut Context<Self>) {
@@ -236,7 +238,10 @@ impl DiskApp {
         self.table.update(cx, |t, cx| t.set_selected_row(row, cx));
     }
     fn find(&mut self, _: &Find, window: &mut Window, cx: &mut Context<Self>) {
+        // Search belongs to the table surface, so reveal it before moving focus.
+        self.map_only = false;
         self.search.update(cx, |s, cx| s.focus(window, cx));
+        cx.notify();
     }
     fn choose_action(&mut self, _: &ChooseFolder, window: &mut Window, cx: &mut Context<Self>) {
         self.choose(window, cx);
@@ -288,9 +293,7 @@ impl DiskApp {
     fn method_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.weak_entity();
         let strategy = self.scan_strategy;
-        Button::new("scan-method")
-            .small()
-            .ghost()
+        quiet_button("scan-method", cx)
             .disabled(self.job.is_some())
             .label(match strategy {
                 ScanStrategy::Auto => "自动",
@@ -321,8 +324,7 @@ impl DiskApp {
     fn menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.weak_entity();
         let ready = self.data.is_some();
-        Button::new("file-menu")
-            .ghost()
+        quiet_button("file-menu", cx)
             .label("文件")
             .dropdown_menu(move |menu, _, _| {
                 let mut menu = menu;
@@ -365,7 +367,7 @@ impl DiskApp {
             })
             .collect();
         let recent = self.preferences.recent.clone();
-        Button::new("volumes")
+        quiet_button("volumes", cx)
             .icon(IconName::HardDrive)
             .label("磁盘")
             .dropdown_menu(move |menu, _, _| {
@@ -484,6 +486,7 @@ impl DiskApp {
                             cx.theme().background
                         })
                         .bg(rgb(color))
+                        .rounded(px(4.))
                         .overflow_hidden()
                         .when(dimmed, |d| d.opacity(0.22))
                         .cursor_pointer()
@@ -561,8 +564,33 @@ impl DiskApp {
                     .items_center()
                     .justify_between()
                     .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(div().min_w_0().truncate().text_sm().child(label))
+                    .border_color(cx.theme().border.opacity(0.6))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .min_w_0()
+                            .child(
+                                Icon::new(IconName::LayoutDashboard)
+                                    .small()
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_sm()
+                                    .child("空间分布"),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label),
+                            ),
+                    )
                     .child(
                         div()
                             .flex()
@@ -578,10 +606,9 @@ impl DiskApp {
                                     })),
                             )
                             .child(
-                                Button::new("map-reset")
-                                    .ghost()
-                                    .small()
-                                    .label("重置")
+                                quiet_button("map-reset", cx)
+                                    .icon(IconName::RotateCw)
+                                    .tooltip("重置空间图")
                                     .on_click(cx.listener(|app, _, _, cx| {
                                         app.map_root = app.scope;
                                         app.request_map(cx);
@@ -618,15 +645,17 @@ impl DiskApp {
                                     })),
                             )
                             .child(
-                                Button::new("map-focus-mode")
-                                    .small()
-                                    .ghost()
-                                    .compact()
-                                    .selected(self.map_only)
-                                    .label(if self.map_only {
+                                toggle_button("map-focus-mode", self.map_only, cx)
+                                    .rounded(px(999.))
+                                    .icon(if self.map_only {
+                                        IconName::Minimize
+                                    } else {
+                                        IconName::Maximize
+                                    })
+                                    .tooltip(if self.map_only {
                                         "恢复树表"
                                     } else {
-                                        "放大"
+                                        "放大空间图"
                                     })
                                     .on_click(cx.listener(|app, _, _, cx| {
                                         app.map_only = !app.map_only;
@@ -635,31 +664,43 @@ impl DiskApp {
                                     })),
                             )
                             .child(
-                                Button::new("map-motion")
-                                    .small()
-                                    .ghost()
-                                    .compact()
-                                    .label("动效")
-                                    .selected(self.motion_enabled)
-                                    .on_click(cx.listener(|app, _, _, cx| {
-                                        app.motion_enabled = !app.motion_enabled;
-                                        cx.notify();
-                                    })),
+                                quiet_button("map-options", cx)
+                                    .icon(IconName::Ellipsis)
+                                    .tooltip("空间图设置")
+                                    .dropdown_menu({
+                                        let owner = cx.weak_entity();
+                                        let motion = self.motion_enabled;
+                                        move |menu, _, _| {
+                                            let owner = owner.clone();
+                                            menu.item(
+                                                PopupMenuItem::new("界面动效")
+                                                    .checked(motion)
+                                                    .on_click(move |_, _, cx| {
+                                                        let _ = owner.update(cx, |app, cx| {
+                                                            app.motion_enabled =
+                                                                !app.motion_enabled;
+                                                            cx.set_reduce_motion(
+                                                                !app.motion_enabled,
+                                                            );
+                                                            cx.notify();
+                                                        });
+                                                    }),
+                                            )
+                                        }
+                                    }),
                             )
                             .child(
-                                Button::new("metric")
-                                    .ghost()
+                                TabBar::new("map-metric")
+                                    .segmented()
                                     .small()
-                                    .label(if self.metric == Metric::Allocated {
-                                        "按实际占用"
-                                    } else {
-                                        "按文件大小"
-                                    })
-                                    .on_click(cx.listener(|app, _, _, cx| {
-                                        app.metric = if app.metric == Metric::Allocated {
-                                            Metric::Size
-                                        } else {
+                                    .selected_index(usize::from(self.metric == Metric::Size))
+                                    .child(Tab::new().label("实际占用"))
+                                    .child(Tab::new().label("文件大小"))
+                                    .on_click(cx.listener(|app, index, _, cx| {
+                                        app.metric = if *index == 0 {
                                             Metric::Allocated
+                                        } else {
+                                            Metric::Size
                                         };
                                         app.request_map(cx);
                                     })),
@@ -752,10 +793,47 @@ fn apply_theme(dark: bool, window: &mut Window, cx: &mut App) {
         cx,
     );
     Theme::update(cx, |theme| {
-        theme.colors.primary = rgb(if dark { 0x0a84ff } else { 0x007aff }).into();
+        let background = rgb(if dark { 0x1c1e22 } else { 0xffffff }).into();
+        let foreground = rgb(if dark { 0xebedf0 } else { 0x25282e }).into();
+        let muted = rgb(if dark { 0x2a2d33 } else { 0xf0f2f5 }).into();
+        let muted_foreground = rgb(if dark { 0xa6adb9 } else { 0x626b79 }).into();
+        let border = rgb(if dark { 0x363a42 } else { 0xe5e8ed }).into();
+        theme.radius = px(7.);
+        theme.radius_lg = px(12.);
+        theme.colors.background = background;
+        theme.colors.foreground = foreground;
+        theme.colors.muted = muted;
+        theme.colors.muted_foreground = muted_foreground;
+        theme.colors.border = border;
+        theme.colors.input = border;
+        theme.colors.primary = rgb(if dark { 0x70b5ff } else { 0x0065d6 }).into();
+        theme.colors.secondary = muted;
+        theme.colors.secondary_foreground = foreground;
+        theme.colors.secondary_hover = rgb(if dark { 0x333740 } else { 0xe9ecf1 }).into();
+        theme.colors.secondary_active = rgb(if dark { 0x3a3f49 } else { 0xe1e5ec }).into();
+        theme.colors.button = background;
+        theme.colors.button_foreground = foreground;
+        theme.colors.button_hover = theme.colors.secondary_hover;
+        theme.colors.button_active = theme.colors.secondary_active;
+        theme.colors.tab_bar_segmented = rgb(if dark { 0x111316 } else { 0xe8ebef }).into();
+        theme.colors.tab_foreground = muted_foreground;
+        theme.colors.tab_active_foreground = foreground;
+        theme.colors.tab_bar = background;
+        theme.colors.tab_active = background;
+        theme.colors.selection = rgb(if dark { 0x243b56 } else { 0xeaf3ff }).into();
+        theme.colors.table = background;
+        theme.colors.table_head = rgb(if dark { 0x24272d } else { 0xf7f8fa }).into();
+        theme.colors.table_head_foreground = muted_foreground;
+        theme.colors.table_even = background;
+        theme.colors.table_hover = rgb(if dark { 0x262b32 } else { 0xf5f8fc }).into();
+        theme.colors.table_active = theme.colors.selection;
+        theme.colors.table_active_border = border.opacity(0.);
+        theme.colors.table_row_border = border.opacity(0.);
+        // Critically damped: rapidly changing tabs retarget the existing spring.
+        theme.motion.spring_move = theme.motion.spring_move.with_damping(1.0);
         theme.colors.primary_hover = rgb(if dark { 0x409cff } else { 0x0062cc }).into();
         theme.colors.primary_active = rgb(0x0056b3).into();
-        theme.colors.primary_foreground = rgb(0xffffff).into();
+        theme.colors.primary_foreground = rgb(if dark { 0x10243c } else { 0xffffff }).into();
         theme.colors.ring = theme.colors.primary;
         theme.colors.button_primary = theme.colors.primary;
         theme.colors.button_primary_hover = theme.colors.primary_hover;

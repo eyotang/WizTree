@@ -6,13 +6,36 @@ impl DiskApp {
             .flex()
             .items_center()
             .gap_2()
-            .h(px(54.))
+            .h(px(60.))
             .flex_shrink_0()
-            .px_3()
-            .bg(cx.theme().background)
+            .px_4()
+            .bg(chrome(cx))
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(self.menu_button(cx).into_any_element())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .mr_4()
+                    .child(
+                        div()
+                            .size(px(30.))
+                            .rounded(px(9.))
+                            .bg(cx.theme().primary.opacity(0.12))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(cx.theme().primary)
+                            .child(Icon::new(IconName::ChartPie).small()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(18.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("WizTree"),
+                    ),
+            )
             .child(self.volumes_button(cx).into_any_element())
             .child(self.method_button(cx).into_any_element())
             .child(div().flex_1().min_w_0().child(if self.path_editing {
@@ -21,9 +44,11 @@ impl DiskApp {
                     .disabled(scanning)
                     .into_any_element()
             } else {
-                Button::new("edit-scan-location")
-                    .small()
-                    .ghost()
+                quiet_button("edit-scan-location", cx)
+                    .icon(IconName::FolderOpen)
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(0.6))
                     .w_full()
                     .disabled(scanning)
                     .label(if self.path.read(cx).value().is_empty() {
@@ -37,9 +62,8 @@ impl DiskApp {
                     .into_any_element()
             }))
             .child(
-                Button::new("choose-folder")
-                    .small()
-                    .compact()
+                quiet_button("choose-folder", cx)
+                    .icon(IconName::Folder)
                     .label("文件夹…")
                     .disabled(scanning || self.folder_picker_open)
                     .on_click(cx.listener(|app, _, window, cx| app.choose(window, cx))),
@@ -48,6 +72,14 @@ impl DiskApp {
                 Button::new("scan-stop")
                     .small()
                     .primary()
+                    .rounded(px(8.))
+                    .w(px(80.))
+                    .h(px(30.))
+                    .icon(if scanning {
+                        IconName::Square
+                    } else {
+                        IconName::Play
+                    })
                     .label(if scanning { "停止" } else { "扫描" })
                     .on_click(cx.listener(|app, _, window, cx| {
                         if app.job.is_some() {
@@ -57,12 +89,20 @@ impl DiskApp {
                         }
                     })),
             )
+            .child(self.menu_button(cx).into_any_element())
             .child(
-                Button::new("appearance")
-                    .small()
-                    .ghost()
-                    .compact()
-                    .label(if self.dark { "浅色" } else { "深色" })
+                quiet_button("appearance", cx)
+                    .rounded(px(999.))
+                    .icon(if self.dark {
+                        IconName::Sun
+                    } else {
+                        IconName::Moon
+                    })
+                    .tooltip(if self.dark {
+                        "切换为浅色外观"
+                    } else {
+                        "切换为深色外观"
+                    })
                     .on_click(cx.listener(|app, _, window, cx| {
                         app.dark = !app.dark;
                         apply_theme(app.dark, window, cx);
@@ -99,7 +139,11 @@ impl DiskApp {
             }
             for &id in &ids[start..] {
                 let label = if id == 0 {
-                    pretty_path(&data.snapshot.root)
+                    data.snapshot
+                        .root
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| pretty_path(&data.snapshot.root))
                 } else {
                     data.snapshot.nodes[id].name.to_string_lossy().into_owned()
                 };
@@ -162,69 +206,63 @@ impl DiskApp {
                     })
             })
             .max_by_key(|volume| volume.root.as_os_str().len());
-        let mut bar = div()
+        let snapshot = self.data.as_ref().map(|data| &data.snapshot);
+        let pending = self.job.as_ref().map(|job| job.progress.snapshot());
+        let occupied = snapshot
+            .map(|s| bytes(s.nodes[0].allocated))
+            .unwrap_or_else(|| "—".into());
+        let files = snapshot
+            .map(|s| number(s.files))
+            .or_else(|| pending.as_ref().map(|p| number(p.files)))
+            .unwrap_or_else(|| "—".into());
+        let folders = snapshot
+            .map(|s| number(s.dirs.saturating_sub(1)))
+            .or_else(|| pending.as_ref().map(|p| number(p.dirs)))
+            .unwrap_or_else(|| "—".into());
+        let free = volume.map(|v| bytes(v.free)).unwrap_or_else(|| "—".into());
+        let free_label = volume
+            .map(|v| format!("磁盘可用 · 容量 {}", bytes(v.total)))
+            .unwrap_or_else(|| "磁盘可用".into());
+        let teal = rgb(if self.dark { 0x69c7b7 } else { 0x187f72 }).into();
+        let violet = rgb(if self.dark { 0xb5a5e4 } else { 0x7865ab }).into();
+        crate::appearance::panel(cx)
+            .mx_4()
+            .mb_3()
+            .px_5()
+            .py_4()
             .flex()
             .items_center()
-            .gap_4()
-            .h(px(34.))
+            .gap_5()
             .flex_shrink_0()
-            .px_4()
-            .text_xs()
-            .bg(cx.theme().muted)
-            .border_b_1()
-            .border_color(cx.theme().border);
-        if let Some(volume) = volume {
-            let used = volume.total.saturating_sub(volume.free);
-            let ratio = if volume.total == 0 {
-                0.
-            } else {
-                used as f64 / volume.total as f64
-            };
-            bar = bar
-                .child(div().font_weight(FontWeight::MEDIUM).child(format!(
-                    "{} {}",
-                    volume.root.display(),
-                    volume.label
-                )))
-                .child(div().child(format!("容量 {}", bytes(volume.total))))
-                .child(div().child(format!("已用 {}", bytes(used))))
-                .child(div().child(format!("可用 {}", bytes(volume.free))))
-                .child(
-                    div()
-                        .w(px(108.))
-                        .h(px(5.))
-                        .rounded_full()
-                        .bg(cx.theme().border)
-                        .child(
-                            div()
-                                .h_full()
-                                .w(relative(ratio.clamp(0., 1.) as f32))
-                                .rounded_full()
-                                .bg(cx.theme().primary),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(volume.filesystem.clone().unwrap_or_default()),
-                );
-        } else {
-            bar = bar.child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("磁盘容量将在选定本地磁盘后显示"),
-            );
-        }
-        bar = bar.child(div().flex_1());
-        if let Some(data) = &self.data {
-            bar = bar.child(div().child(format!(
-                "{} {} · {} 个文件",
-                "已分析",
-                bytes(data.snapshot.nodes[0].allocated),
-                number(data.snapshot.files)
-            )));
-        }
-        bar.into_any_element()
+            .child(crate::appearance::metric(
+                IconName::ChartPie,
+                "已分析占用",
+                occupied,
+                cx.theme().primary,
+                cx,
+            ))
+            .child(crate::appearance::metric(
+                IconName::FileText,
+                "文件",
+                files,
+                cx.theme().primary,
+                cx,
+            ))
+            .child(crate::appearance::metric(
+                IconName::Folder,
+                "文件夹",
+                folders,
+                teal,
+                cx,
+            ))
+            .child(crate::appearance::metric(
+                IconName::HardDrive,
+                &free_label,
+                free,
+                violet,
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn view_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -232,50 +270,38 @@ impl DiskApp {
             .flex()
             .items_center()
             .gap_2()
-            .h(px(43.))
+            .h(px(48.))
             .flex_shrink_0()
-            .px_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
+            .px_4()
             .child(
-                Button::new("tree-mode")
-                    .small()
-                    .ghost()
-                    .selected(self.mode == Mode::Tree && !self.is_filtered(cx))
-                    .label("目录树")
-                    .on_click(cx.listener(|app, _, window, cx| {
-                        app.clear_filter(window, cx);
-                        app.mode = Mode::Tree;
-                        app.extension = None;
-                        app.request_query(cx);
-                    })),
-            )
-            .child(
-                Button::new("files-mode")
-                    .small()
-                    .ghost()
-                    .selected(self.mode == Mode::Files || self.is_filtered(cx))
-                    .label("文件视图")
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.mode = Mode::Files;
+                TabBar::new("view-mode")
+                    .segmented()
+                    .selected_index(usize::from(
+                        self.mode == Mode::Files || self.is_filtered(cx),
+                    ))
+                    .child(Tab::new().label("目录树"))
+                    .child(Tab::new().label("文件视图"))
+                    .on_click(cx.listener(|app, index, window, cx| {
+                        if *index == 0 {
+                            app.clear_filter(window, cx);
+                            app.mode = Mode::Tree;
+                        } else {
+                            app.mode = Mode::Files;
+                        }
                         app.extension = None;
                         app.request_query(cx);
                     })),
             )
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(cx.theme().border))
             .child(
-                Button::new("history-back")
-                    .small()
-                    .ghost()
+                quiet_button("history-back", cx)
                     .compact()
                     .icon(IconName::ChevronLeft)
                     .disabled(!self.history.can_back())
                     .on_click(cx.listener(|app, _, window, cx| app.go_back(&GoBack, window, cx))),
             )
             .child(
-                Button::new("history-forward")
-                    .small()
-                    .ghost()
+                quiet_button("history-forward", cx)
                     .compact()
                     .icon(IconName::ChevronRight)
                     .disabled(!self.history.can_forward())
@@ -284,9 +310,7 @@ impl DiskApp {
                     ),
             )
             .child(
-                Button::new("parent-folder")
-                    .small()
-                    .ghost()
+                quiet_button("parent-folder", cx)
                     .compact()
                     .icon(IconName::ArrowUp)
                     .disabled(self.scope == 0)
@@ -294,24 +318,26 @@ impl DiskApp {
             )
             .child(div().flex_1().min_w_0().child(self.breadcrumbs(cx)))
             .child(
-                Button::new("show-types")
-                    .small()
-                    .ghost()
-                    .compact()
-                    .selected(self.show_types)
-                    .label("侧栏")
+                toggle_button("show-types", self.show_types, cx)
+                    .rounded(px(999.))
+                    .w(px(30.))
+                    .h(px(30.))
+                    .icon(IconName::PanelRight)
+                    .accessibility_label("侧栏")
+                    .tooltip("显示或隐藏侧栏")
                     .on_click(cx.listener(|app, _, _, cx| {
                         app.show_types = !app.show_types;
                         cx.notify();
                     })),
             )
             .child(
-                Button::new("show-map")
-                    .small()
-                    .ghost()
-                    .compact()
-                    .selected(self.show_map)
-                    .label("空间图")
+                toggle_button("show-map", self.show_map, cx)
+                    .rounded(px(999.))
+                    .w(px(30.))
+                    .h(px(30.))
+                    .icon(IconName::LayoutDashboard)
+                    .accessibility_label("空间图")
+                    .tooltip("显示或隐藏空间图")
                     .on_click(cx.listener(|app, _, _, cx| {
                         app.show_map = !app.show_map;
                         if app.show_map {
@@ -328,51 +354,44 @@ impl DiskApp {
             .flex()
             .items_center()
             .gap_2()
-            .h(px(34.))
-            .px_3()
+            .h(px(38.))
+            .px_4()
+            .gap_4()
             .text_xs();
         options = options
             .child(
-                Button::new("match-paths")
+                Checkbox::new("match-paths")
                     .small()
-                    .ghost()
-                    .compact()
-                    .selected(self.match_paths)
+                    .checked(self.match_paths)
                     .label("匹配完整路径")
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.match_paths = !app.match_paths;
+                    .on_click(cx.listener(|app, checked, _, cx| {
+                        app.match_paths = *checked;
                         app.request_query(cx);
                     })),
             )
             .child(
-                Button::new("include-folders")
+                Checkbox::new("include-folders")
                     .small()
-                    .ghost()
-                    .compact()
-                    .selected(self.include_folders)
+                    .checked(self.include_folders)
                     .label("包括文件夹")
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.include_folders = !app.include_folders;
+                    .on_click(cx.listener(|app, checked, _, cx| {
+                        app.include_folders = *checked;
                         app.request_query(cx);
                     })),
             )
             .child(
-                Button::new("duplicate-names")
+                Checkbox::new("duplicate-names")
                     .small()
-                    .ghost()
-                    .compact()
-                    .selected(self.duplicates)
+                    .checked(self.duplicates)
                     .label("同名同大小候选")
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.duplicates = !app.duplicates;
+                    .on_click(cx.listener(|app, checked, _, cx| {
+                        app.duplicates = *checked;
                         app.request_query(cx);
                     })),
             )
             .child(div().w(px(1.)).h(px(14.)).mx_1().bg(cx.theme().border))
             .child(
-                Button::new("result-limit")
-                    .small()
-                    .ghost()
+                quiet_button("result-limit", cx)
                     .compact()
                     .label(if self.limit == 0 {
                         "结果：全部".to_string()
@@ -400,81 +419,132 @@ impl DiskApp {
             ));
         }
         options = options.child(
-            Button::new("clear-filters")
-                .small()
-                .ghost()
+            quiet_button("clear-filters", cx)
                 .compact()
                 .label("清除筛选")
-                .disabled(!self.is_filtered(cx))
+                .disabled(!self.is_filtered(cx) && !self.match_paths && !self.include_folders)
                 .on_click(cx.listener(|app, _, window, cx| app.clear_filter(window, cx))),
         );
+        let active_options = usize::from(self.match_paths)
+            + usize::from(self.include_folders)
+            + usize::from(self.duplicates)
+            + usize::from(!self.exclude.read(cx).value().is_empty())
+            + usize::from(!self.minimum.read(cx).value().is_empty());
         div()
             .flex()
             .flex_col()
             .flex_shrink_0()
-            .bg(cx.theme().background)
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border.opacity(0.6))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .h(px(42.))
-                    .px_3()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("筛选"),
-                    )
+                    .gap_3()
+                    .h(px(48.))
+                    .px_4()
                     .child(
                         div().flex_1().min_w_0().child(
                             Input::new(&self.search)
                                 .small()
+                                .appearance(false)
                                 .prefix(Icon::new(IconName::Search).small())
                                 .cleanable(true),
                         ),
                     )
                     .child(
-                        div()
-                            .w(px(220.))
-                            .child(Input::new(&self.exclude).small().cleanable(true)),
-                    )
-                    .child(
-                        div()
-                            .w(px(180.))
-                            .child(Input::new(&self.minimum).small().cleanable(true)),
+                        toggle_button(
+                            "filter-options",
+                            self.show_filter_options || active_options > 0,
+                            cx,
+                        )
+                        .icon(IconName::Settings2)
+                        .label(if active_options == 0 {
+                            "筛选条件".to_string()
+                        } else {
+                            format!("筛选条件 · {active_options}")
+                        })
+                        .toggled(self.show_filter_options)
+                        .on_click(cx.listener(|app, _, _, cx| {
+                            app.show_filter_options = !app.show_filter_options;
+                            cx.notify();
+                        })),
                     ),
             )
-            .child(options)
+            .when(self.show_filter_options, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_4()
+                        .py_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("排除"),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Input::new(&self.exclude).small().cleanable(true)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("最小大小"),
+                        )
+                        .child(
+                            div()
+                                .w(px(160.))
+                                .child(Input::new(&self.minimum).small().cleanable(true)),
+                        ),
+                )
+                .child(options)
+            })
             .into_any_element()
     }
 
     fn view_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
-        let explorer = div()
-            .on_key_down(cx.listener(Self::marking_key))
+        let explorer = crate::appearance::panel(cx)
             .size_full()
+            .flex()
+            .flex_col()
+            .child(self.view_navigation(cx))
+            .child(self.view_filters(cx))
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
             .child(
-                DataTable::new(&self.table)
-                    .with_size(px(28.))
-                    .header_row_height(px(30.))
-                    .stripe(true)
-                    .bordered(false)
-                    .scrollbar_visible(true, true),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .on_key_down(cx.listener(Self::marking_key))
+                    .child(
+                        DataTable::new(&self.table)
+                            .with_size(px(30.))
+                            .header_row_height(px(32.))
+                            .stripe(false)
+                            .bordered(false)
+                            .scrollbar_visible(true, true),
+                    ),
             );
-        let map = self.treemap(cx).into_any_element();
+        let map = crate::appearance::panel(cx)
+            .size_full()
+            .child(self.treemap(cx))
+            .into_any_element();
         let main = if self.map_only {
             map
         } else {
             v_resizable("tables-and-map")
                 .child(
                     resizable_panel()
-                        .size(px(400.))
-                        .size_range(px(140.)..px(2400.))
+                        .size(px(430.))
+                        .size_range(
+                            px(if self.show_filter_options { 300. } else { 210. })..px(2400.),
+                        )
                         .child(explorer),
                 )
                 .child(
@@ -482,7 +552,7 @@ impl DiskApp {
                         .size(px(300.))
                         .size_range(px(100.)..px(1800.))
                         .visible(self.show_map)
-                        .child(map),
+                        .child(div().pt_3().size_full().child(map)),
                 )
                 .into_any_element()
         };
@@ -491,19 +561,28 @@ impl DiskApp {
             .min_h_0()
             .min_w_0()
             .overflow_hidden()
+            .px_4()
+            .pb_3()
             .child(
                 h_resizable("workspace-and-inspector")
                     .child(
-                        resizable_panel()
-                            .size_range(px(440.)..px(4000.))
-                            .child(main),
+                        resizable_panel().size_range(px(440.)..px(4000.)).child(
+                            div()
+                                .pr(px(if self.show_types { 12. } else { 0. }))
+                                .size_full()
+                                .child(main),
+                        ),
                     )
                     .child(
                         resizable_panel()
                             .size(px(340.))
                             .size_range(px(290.)..px(600.))
                             .visible(self.show_types)
-                            .child(self.inspector(cx)),
+                            .child(
+                                crate::appearance::panel(cx)
+                                    .size_full()
+                                    .child(self.inspector(cx)),
+                            ),
                     ),
             )
             .into_any_element()
@@ -519,8 +598,6 @@ impl Render for DiskApp {
         }
         let toolbar = self.view_toolbar(cx);
         let capacity = self.capacity(cx);
-        let navigation = self.view_navigation(cx);
-        let filters = self.view_filters(cx);
         let workspace = self.view_workspace(cx);
         let status = if let Some(job) = &self.job {
             let progress = job.progress.snapshot();
@@ -562,7 +639,7 @@ impl Render for DiskApp {
             .flex_col()
             .overflow_hidden()
             .text_sm()
-            .bg(cx.theme().background)
+            .bg(chrome(cx))
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::go_forward))
@@ -584,8 +661,6 @@ impl Render for DiskApp {
             .on_action(cx.listener(Self::trash))
             .child(toolbar)
             .child(capacity)
-            .child(navigation)
-            .child(filters)
             .child(workspace)
             .child(
                 div()
@@ -596,9 +671,7 @@ impl Render for DiskApp {
                     .items_center()
                     .gap_4()
                     .text_xs()
-                    .bg(cx.theme().muted)
-                    .border_t_1()
-                    .border_color(cx.theme().border)
+                    .bg(chrome(cx))
                     .child(div().flex_1().min_w_0().truncate().child(status))
                     .child(
                         div()
